@@ -1,95 +1,263 @@
+import * as Haptics from 'expo-haptics';
 import React from 'react';
-import { ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import type { ActivityEvent } from '@/features/wingman/data';
 import { useWingman } from '@/features/wingman/provider';
-import { PipCircle, ScreenHeader, StickerCard } from '@/features/wingman/primitives';
-import { wingmanFonts, wingmanLayout } from '@/features/wingman/theme';
+import { IconGlyph, PipCircle, WingmanLabel } from '@/features/wingman/primitives';
+import {
+  withAlpha,
+  wingmanFonts,
+  wingmanLayout,
+} from '@/features/wingman/theme';
+
+function actionLabelFor(event: ActivityEvent) {
+  const haystack = `${event.title} ${event.subtitle}`.toLowerCase();
+
+  if (haystack.includes('email') || haystack.includes('digest')) return 'Open';
+  if (haystack.includes('scheduled') || haystack.includes('meeting') || haystack.includes('lunch')) return 'View';
+  if (haystack.includes('reminder')) return 'Done';
+  if (haystack.includes('pr') || haystack.includes('merged')) return 'Review';
+  if (haystack.includes('flow')) return 'Edit';
+  return 'View';
+}
+
+function sectionFor(event: ActivityEvent) {
+  return event.when.toLowerCase().includes('yesterday') ? 'Earlier' : 'Today';
+}
+
+function ActivityRow({
+  event,
+  index,
+  isLast,
+}: {
+  event: ActivityEvent;
+  index: number;
+  isLast: boolean;
+}) {
+  const { colors } = useWingman();
+  const unread = sectionFor(event) === 'Today';
+  const actionLabel = actionLabelFor(event);
+
+  return (
+    <Animated.View
+      entering={FadeInDown.delay(45 + index * 35).duration(300).springify().damping(18)}
+      style={{
+        borderBottomWidth: isLast ? 0 : 1,
+        borderBottomColor: colors.border,
+      }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${event.title}. ${event.subtitle}. ${event.when}`}
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => undefined);
+        }}
+        style={({ pressed }) => ({
+          minHeight: 72,
+          paddingVertical: 11,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          opacity: pressed ? 0.72 : 1,
+        })}>
+        <View style={{ position: 'relative' }}>
+          <PipCircle
+            variant={event.pip}
+            size={44}
+            ring={false}
+            backgroundColor={withAlpha(event.color, unread ? 0.18 : 0.1)}
+          />
+          {unread ? (
+            <View
+              style={{
+                position: 'absolute',
+                right: 0,
+                top: 0,
+                width: 10,
+                height: 10,
+                borderRadius: 999,
+                backgroundColor: colors.sky500,
+                borderWidth: 2,
+                borderColor: colors.bg,
+              }}
+            />
+          ) : null}
+        </View>
+
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <Text
+            numberOfLines={2}
+            style={{
+              color: unread ? colors.ink : colors.fgSecondary,
+              fontFamily: wingmanFonts.text,
+              fontSize: 13,
+              fontWeight: '600',
+              lineHeight: 18,
+              letterSpacing: 0,
+            }}>
+            <Text style={{ fontWeight: '900' }}>{event.title}</Text>
+            {` ${event.subtitle}`}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={{
+              color: colors.fgMuted,
+              fontFamily: wingmanFonts.text,
+              fontSize: 11,
+              fontWeight: '700',
+              letterSpacing: 0,
+            }}>
+            {event.when}
+          </Text>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${actionLabel} ${event.title}`}
+          onPress={(pressEvent) => {
+            pressEvent.stopPropagation();
+            Haptics.selectionAsync().catch(() => undefined);
+          }}
+          style={({ pressed }) => ({
+            minWidth: 56,
+            height: 30,
+            paddingHorizontal: 10,
+            borderRadius: 9,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: unread ? colors.sky500 : colors.cardAlt,
+            borderWidth: 1,
+            borderColor: unread ? colors.sky700 : colors.border,
+            opacity: pressed ? 0.78 : 1,
+            borderCurve: 'continuous',
+          })}>
+          <Text
+            style={{
+              color: unread ? '#FFFFFF' : colors.fgSecondary,
+              fontFamily: wingmanFonts.text,
+              fontSize: 10,
+              fontWeight: '900',
+              letterSpacing: 0,
+            }}>
+            {actionLabel}
+          </Text>
+        </Pressable>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function ActivitySection({
+  title,
+  events,
+  offset,
+}: {
+  title: string;
+  events: ActivityEvent[];
+  offset: number;
+}) {
+  const { colors } = useWingman();
+
+  if (!events.length) return null;
+
+  return (
+    <View style={{ gap: 8 }}>
+      <WingmanLabel color={title === 'Today' ? colors.sky500 : colors.fgMuted}>{title}</WingmanLabel>
+      <View
+        style={{
+          paddingHorizontal: 2,
+        }}>
+        {events.map((event, index) => (
+          <ActivityRow
+            key={event.id}
+            event={event}
+            index={offset + index}
+            isLast={index === events.length - 1}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
 
 export function ActivityScreen() {
+  const insets = useSafeAreaInsets();
   const { colors, events } = useWingman();
+  const todayEvents = events.filter((event) => sectionFor(event) === 'Today');
+  const earlierEvents = events.filter((event) => sectionFor(event) === 'Earlier');
 
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
+      contentInsetAdjustmentBehavior="never"
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{
-        paddingBottom: 88,
+        paddingTop: Math.max(insets.top + 14, 18),
+        paddingHorizontal: wingmanLayout.screenPadding,
+        paddingBottom: Math.max(insets.bottom, 16) + 112,
+        gap: 18,
       }}>
-      <ScreenHeader
-        title="Activity"
-        subtitle="Everything Pip's been up to"
-      />
       <View
         style={{
-          paddingHorizontal: wingmanLayout.screenPadding,
-          paddingTop: 4,
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: 16,
         }}>
+        <View style={{ gap: 5 }}>
+          <WingmanLabel>Notifications</WingmanLabel>
+          <Text
+            style={{
+              color: colors.fgPrimary,
+              fontFamily: wingmanFonts.display,
+              fontSize: 32,
+              fontWeight: '700',
+              lineHeight: 34,
+              letterSpacing: 0,
+            }}>
+            Activity
+          </Text>
+          <Text
+            style={{
+              color: colors.fgSecondary,
+              fontFamily: wingmanFonts.text,
+              fontSize: 13,
+              fontWeight: '700',
+              lineHeight: 18,
+            }}>
+            Recent actions and updates
+          </Text>
+        </View>
         <View
           style={{
-            position: 'absolute',
-            left: 36,
-            top: 14,
-            bottom: 0,
-            width: 2,
-            backgroundColor: colors.borderStrong,
-          }}
-        />
-        <View style={{ gap: 12 }}>
-          {events.map((event) => (
-            <View
-              key={event.id}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'flex-start',
-                gap: 14,
-              }}>
-              <View style={{ zIndex: 2, marginTop: 2 }}>
-                <PipCircle variant={event.pip} size={38} ring />
-              </View>
-              <StickerCard
-                style={{
-                  flex: 1,
-                  paddingHorizontal: 12,
-                  paddingVertical: 10,
-                  borderRadius: 16,
-                }}>
-                <View style={{ flexDirection: 'row', gap: 8, justifyContent: 'space-between' }}>
-                  <Text
-                    style={{
-                      color: colors.ink,
-                      fontFamily: wingmanFonts.display,
-                      fontSize: 15,
-                      fontWeight: '700',
-                      flex: 1,
-                    }}>
-                    {event.title}
-                  </Text>
-                  <Text
-                    style={{
-                      color: colors.fgMuted,
-                      fontFamily: wingmanFonts.text,
-                      fontSize: 10,
-                      fontWeight: '800',
-                      letterSpacing: 0.3,
-                    }}>
-                    {event.when}
-                  </Text>
-                </View>
-                <Text
-                  style={{
-                    color: colors.fgSecondary,
-                    fontFamily: wingmanFonts.text,
-                    fontSize: 12,
-                    fontWeight: '500',
-                    marginTop: 4,
-                  }}>
-                  {event.subtitle}
-                </Text>
-              </StickerCard>
-            </View>
-          ))}
+            height: 32,
+            paddingHorizontal: 10,
+            borderRadius: 999,
+            backgroundColor: withAlpha(colors.sky500, 0.12),
+            borderWidth: 1,
+            borderColor: withAlpha(colors.sky500, 0.22),
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            borderCurve: 'continuous',
+          }}>
+          <IconGlyph name="notifications" color={colors.sky600} size={15} />
+          <Text
+            style={{
+              color: colors.sky600,
+              fontFamily: wingmanFonts.text,
+              fontSize: 12,
+              fontWeight: '800',
+              letterSpacing: 0,
+            }}>
+            {todayEvents.length} new
+          </Text>
         </View>
       </View>
+
+      <ActivitySection title="Today" events={todayEvents} offset={0} />
+      <ActivitySection title="Earlier" events={earlierEvents} offset={todayEvents.length} />
     </ScrollView>
   );
 }

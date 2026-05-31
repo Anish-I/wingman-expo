@@ -1,3 +1,5 @@
+import type { TextStyle } from 'react-native';
+
 export type ThemeMode = 'light' | 'dark' | 'auto';
 export type ResolvedTheme = 'light' | 'dark';
 
@@ -87,6 +89,43 @@ export const wingmanLayout = {
   radiusXl: 28,
   screenPadding: 22,
   tabBarHeight: 100,
+} as const;
+
+export const wingmanTypography = {
+  screenTitle: {
+    fontFamily: wingmanFonts.display,
+    fontSize: 32,
+    fontWeight: '700',
+    lineHeight: 35,
+    letterSpacing: 0,
+  } satisfies TextStyle,
+  onboardingTitle: {
+    fontFamily: wingmanFonts.display,
+    fontSize: 38,
+    fontWeight: '700',
+    lineHeight: 41,
+    letterSpacing: 0,
+  } satisfies TextStyle,
+  onboardingBody: {
+    fontFamily: wingmanFonts.text,
+    fontSize: 16,
+    fontWeight: '500',
+    lineHeight: 24,
+    letterSpacing: 0,
+  } satisfies TextStyle,
+  body: {
+    fontFamily: wingmanFonts.text,
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 20,
+    letterSpacing: 0,
+  } satisfies TextStyle,
+  label: {
+    fontFamily: wingmanFonts.text,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+  } satisfies TextStyle,
 } as const;
 
 export function withAlpha(hex: string, alpha: number) {

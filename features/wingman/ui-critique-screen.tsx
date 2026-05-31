@@ -1,5 +1,7 @@
 import React from 'react';
 import { useWindowDimensions, ScrollView, Text, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWingman } from '@/features/wingman/provider';
 import {
@@ -16,6 +18,7 @@ type CritiqueTarget = 'home' | 'chat' | 'apps' | 'flows' | 'settings' | 'onboard
 export function UiCritiqueScreen() {
   const { critiqueUi, colors, resolvedTheme } = useWingman();
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [screenId, setScreenId] = React.useState<CritiqueTarget>('home');
   const [loading, setLoading] = React.useState(false);
   const [report, setReport] = React.useState<Awaited<ReturnType<typeof critiqueUi>> | null>(null);
@@ -40,10 +43,10 @@ export function UiCritiqueScreen() {
 
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
+      contentInsetAdjustmentBehavior="never"
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{
-        paddingBottom: 80,
+        paddingBottom: insets.bottom + 100,
         gap: 18,
       }}>
       <ScreenHeader
@@ -52,6 +55,7 @@ export function UiCritiqueScreen() {
       />
 
       <View style={{ paddingHorizontal: wingmanLayout.screenPadding, gap: 16 }}>
+        <Animated.View entering={FadeInDown.duration(380).springify().damping(18)}>
         <StickerCard style={{ padding: 16, gap: 12 }}>
           <WingmanLabel color={colors.sky500}>Target surface</WingmanLabel>
           <SegmentedControl
@@ -76,8 +80,10 @@ export function UiCritiqueScreen() {
             {loading ? 'Critiquing…' : 'Run critique'}
           </WingmanButton>
         </StickerCard>
+        </Animated.View>
 
         {error ? (
+          <Animated.View entering={FadeInDown.duration(280).springify().damping(18)}>
           <StickerCard style={{ padding: 14 }}>
             <Text
               style={{
@@ -89,9 +95,11 @@ export function UiCritiqueScreen() {
               {error}
             </Text>
           </StickerCard>
+          </Animated.View>
         ) : null}
 
         {report ? (
+          <Animated.View entering={FadeInDown.duration(380).springify().damping(18)}>
           <StickerCard style={{ padding: 16, gap: 14 }}>
             <View style={{ gap: 6 }}>
               <WingmanLabel color={report.verdict === 'pass' ? colors.mint500 : colors.sun500}>Verdict</WingmanLabel>
@@ -160,6 +168,7 @@ export function UiCritiqueScreen() {
               ))}
             </View>
           </StickerCard>
+          </Animated.View>
         ) : null}
       </View>
     </ScrollView>

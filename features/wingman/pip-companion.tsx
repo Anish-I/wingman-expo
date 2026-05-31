@@ -18,48 +18,59 @@ type Mode = 'walking' | 'flying-up' | 'nested' | 'flying-down';
 type SpriteAnimation = 'walk' | 'glide' | 'clap' | 'wave' | 'idle' | 'idleSparkle' | 'idleBounce';
 
 const SPRITE_FRAMES = [
-  require('@/assets/pip-anim/pip-frame-00.png'),
-  require('@/assets/pip-anim/pip-frame-01.png'),
-  require('@/assets/pip-anim/pip-frame-02.png'),
-  require('@/assets/pip-anim/pip-frame-03.png'),
-  require('@/assets/pip-anim/pip-frame-04.png'),
-  require('@/assets/pip-anim/pip-frame-05.png'),
-  require('@/assets/pip-anim/pip-frame-06.png'),
-  require('@/assets/pip-anim/pip-frame-07.png'),
-  require('@/assets/pip-anim/pip-frame-08.png'),
-  require('@/assets/pip-anim/pip-frame-09.png'),
-  require('@/assets/pip-anim/pip-frame-10.png'),
-  require('@/assets/pip-anim/pip-frame-11.png'),
-  require('@/assets/pip-anim/pip-frame-12.png'),
-  require('@/assets/pip-anim/pip-frame-13.png'),
-  require('@/assets/pip-anim/pip-frame-14.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-00.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-01.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-02.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-03.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-04.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-05.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-06.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-07.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-08.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-09.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-10.png'),
+  require('@/assets/pip-chat-motion/pip-chat-idle-11.png'),
+  require('@/assets/pip-chat-motion/pip-chat-walk-00.png'),
+  require('@/assets/pip-chat-motion/pip-chat-walk-01.png'),
+  require('@/assets/pip-chat-motion/pip-chat-walk-02.png'),
+  require('@/assets/pip-chat-motion/pip-chat-walk-03.png'),
+  require('@/assets/pip-chat-motion/pip-chat-flight-00.png'),
+  require('@/assets/pip-chat-motion/pip-chat-flight-01.png'),
+  require('@/assets/pip-chat-motion/pip-chat-flight-02.png'),
+  require('@/assets/pip-chat-motion/pip-chat-flight-03.png'),
+  require('@/assets/pip-chat-motion/pip-chat-jump-00.png'),
+  require('@/assets/pip-chat-motion/pip-chat-land-00.png'),
+  require('@/assets/pip-chat-motion/pip-chat-clap-00.png'),
+  require('@/assets/pip-chat-motion/pip-chat-clap-01.png'),
+  require('@/assets/pip-chat-motion/pip-chat-wave-00.png'),
+  require('@/assets/pip-chat-motion/pip-chat-wave-01.png'),
 ] as const;
 
 const SPRITE_ANIMATIONS: Record<SpriteAnimation, { frames: readonly number[]; frameMs: number }> = {
-  walk: { frames: [0, 1, 2, 3], frameMs: 125 },
-  glide: { frames: [8], frameMs: 500 },
-  clap: { frames: [6, 7], frameMs: 140 },
-  idle: { frames: [8, 9], frameMs: 500 },
-  wave: { frames: [10, 10, 11], frameMs: 125 },
-  idleSparkle: { frames: [12, 13], frameMs: 240 },
-  idleBounce: { frames: [14, 8], frameMs: 260 },
+  walk: { frames: [12, 13, 14, 15], frameMs: 125 },
+  glide: { frames: [16, 17, 18, 19], frameMs: 95 },
+  clap: { frames: [22, 23], frameMs: 140 },
+  idle: { frames: [0, 0, 1, 2, 3, 4, 5, 6, 7, 6, 8, 9, 10, 11, 11], frameMs: 240 },
+  wave: { frames: [24, 25], frameMs: 160 },
+  idleSparkle: { frames: [0, 1, 2, 3, 4, 8, 9, 10, 11], frameMs: 240 },
+  idleBounce: { frames: [0, 1, 2, 3, 4, 8, 9, 10, 11], frameMs: 240 },
 };
 
 const WALK_SPEED_PX_PER_SEC = 38;
 const HOP_PERIOD_MS = 720;
 const HOP_HEIGHT_PX = 3;
-const PAUSE_MIN_MS = 1250;
-const PAUSE_RANGE_MS = 2200;
+const PAUSE_MIN_MS = 3560;
+const PAUSE_RANGE_MS = 0;
 const FLY_UP_MS = 440;
 const FLY_DOWN_MS = 390;
 const ARC_LIFT_UP = 56;
 const ARC_LIFT_DOWN = 32;
 const BURST_MS = 700;
-const IDLE_EMOTE_ODDS = 0.14;
+const IDLE_EMOTE_ODDS = 0;
 const FLOOR_CLEARANCE_PX = -2;
 const NEST_SCALE = 0.62;
-const WAVE_ODDS = 0.12;
-const GLIDE_ODDS = 0.34;
+const WAVE_ODDS = 0;
+const GLIDE_ODDS = 0.45;
 
 export type PipCompanionProps = {
   floor: PipAnchorRect | null;
@@ -182,11 +193,12 @@ export function PipCompanion({
         if (maxX <= minX) return;
         const currentX = posRef.current.x;
 
-        let targetX = currentX - (44 + Math.random() * 42);
+        const direction = Math.random() < 0.5 ? -1 : 1;
+        let targetX = currentX + direction * (44 + Math.random() * 42);
         const distance = Math.abs(targetX - currentX);
-        const wrapped = targetX < minX || distance < 36;
+        const wrapped = targetX < minX || targetX > maxX || distance < 36;
         if (wrapped) {
-          targetX = maxX;
+          targetX = direction < 0 ? maxX : minX;
         }
 
         const roll = Math.random();
@@ -301,7 +313,7 @@ export function PipCompanion({
     setReady(true);
     modeRef.current = 'walking';
     setAnimationName('idle');
-    scheduleWalkTick(0);
+    scheduleWalkTick(PAUSE_MIN_MS);
   }, [floor, posX, posY, size, scheduleWalkTick]);
 
   const flyUp = React.useCallback(() => {
@@ -467,7 +479,7 @@ export function PipCompanion({
             transform: [
               { translateX: posX },
               { translateY: posY },
-              { translateY: animationName === 'glide' ? 0 : hopOffset },
+              { translateY: animationName === 'walk' ? hopOffset : 0 },
               { scale },
               { scaleX: facing },
             ],

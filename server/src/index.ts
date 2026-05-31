@@ -5,8 +5,14 @@ import Fastify from 'fastify';
 import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
 
-import { DemoStore } from './store.js';
+import { SqliteStore } from './store.js';
 import { buildUiCritique } from './ui-critique.js';
+import { pickProvider } from './llm/provider.js';
+import { createComposioRuntime } from './tools/composio.js';
+import { buildRegistry } from './tools/registry.js';
+import { openSSE } from './chat/sse.js';
+import { runChatTurn } from './chat/orchestrator.js';
+import type { ChatEvent } from './llm/types.js';
 
 loadEnv();
 
@@ -14,10 +20,24 @@ const env = z.object({
   PORT: z.coerce.number().default(3002),
   FRONTEND_URL: z.string().default('http://localhost:8082'),
   DEFAULT_LLM_PROVIDER: z.string().default('demo'),
+  LLM_PROVIDER: z.string().optional(),
+  LLM_MODEL: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  COMPOSIO_API_KEY: z.string().optional(),
+  COMPOSIO_AUTH_CONFIGS: z.string().optional(),
 }).parse(process.env);
 
 const app = Fastify({ logger: true });
-const store = new DemoStore();
+const store = new SqliteStore();
+const llmProvider = pickProvider({
+  LLM_PROVIDER: env.LLM_PROVIDER,
+  LLM_MODEL: env.LLM_MODEL,
+  OPENAI_API_KEY: env.OPENAI_API_KEY,
+});
+const composioRuntime = createComposioRuntime({
+  COMPOSIO_API_KEY: env.COMPOSIO_API_KEY,
+  COMPOSIO_AUTH_CONFIGS: env.COMPOSIO_AUTH_CONFIGS,
+});
 
 const authPayloadSchema = z.object({
   email: z.string().email(),
@@ -58,47 +78,6 @@ function getAuthedUser(request: { headers: Record<string, unknown> }) {
   return store.getUserBySession(token);
 }
 
-function parseTargetDay(message: string) {
-  if (message.includes('tomorrow')) return 1;
-  return 0;
-}
-
-function parseTime(message: string) {
-  if (message.includes('noon')) return { hour: 12, minute: 0 };
-
-  const match = message.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i);
-  if (!match) return { hour: 10, minute: 0 };
-
-  const rawHour = Number(match[1]);
-  const minute = Number(match[2] ?? '0');
-  const suffix = match[3].toLowerCase();
-  const hour = suffix === 'pm' && rawHour < 12 ? rawHour + 12 : suffix === 'am' && rawHour === 12 ? 0 : rawHour;
-  return { hour, minute };
-}
-
-function buildEventDraft(message: string) {
-  const lower = message.toLowerCase();
-  const dayOffset = parseTargetDay(lower);
-  const { hour, minute } = parseTime(lower);
-  const start = new Date();
-  start.setDate(start.getDate() + dayOffset);
-  start.setHours(hour, minute, 0, 0);
-  const end = new Date(start);
-  end.setMinutes(end.getMinutes() + 30);
-
-  let title = 'New event';
-  if (lower.includes('lunch')) title = 'Lunch';
-  else if (lower.includes('meeting')) title = 'Meeting';
-  else if (lower.includes('review')) title = 'Review';
-
-  return {
-    title,
-    startIso: start.toISOString(),
-    endIso: end.toISOString(),
-    subtitle: `Created from chat · ${dayOffset === 1 ? 'Tomorrow' : 'Today'} ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(start)}`,
-  };
-}
-
 function serializeAuth(account: { id: string; name: string; email: string; phone: string; tier: 'Pro' }, token: string) {
   return {
     session: {
@@ -123,7 +102,8 @@ await app.register(cors, { origin: true });
 
 app.get('/health', async () => ({
   ok: true,
-  provider: env.DEFAULT_LLM_PROVIDER,
+  provider: llmProvider.id,
+  composio: composioRuntime.enabled,
 }));
 
 app.post('/auth/demo/create', async (request, reply) => {
@@ -160,7 +140,7 @@ app.get('/apps', async (request, reply) => {
   }
   return reply.send({
     totalAvailable: 1003,
-    items: store.getApps(),
+    items: store.getApps(user.id),
   });
 });
 
@@ -169,8 +149,8 @@ app.get('/apps/status', async (request, reply) => {
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  const connected = store.getApps().filter((item) => item.connected).map((item) => item.slug);
-  const missing = store.getApps().filter((item) => !item.connected).map((item) => item.slug);
+  const connected = store.getApps(user.id).filter((item) => item.connected).map((item) => item.slug);
+  const missing = store.getApps(user.id).filter((item) => !item.connected).map((item) => item.slug);
   return reply.send({ connected, missing });
 });
 
@@ -210,106 +190,89 @@ app.delete('/connect/:app', async (request, reply) => {
   return reply.send({ ok: true });
 });
 
+app.post('/chat/stream', async (request, reply) => {
+  const user = getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const payload = chatPayloadSchema.parse(request.body);
+  const writer = openSSE(reply);
+  const ctx = { userId: user.id, store };
+  const registry = await buildRegistry({ ctx, composio: composioRuntime, message: payload.message });
+  await runChatTurn({
+    provider: llmProvider,
+    registry,
+    ctx,
+    userMessage: payload.message,
+    writer,
+  }).catch((err) => {
+    writer.send({ type: 'error', message: (err as Error).message });
+    writer.close();
+  });
+});
+
 app.post('/chat', async (request, reply) => {
   const user = getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   const payload = chatPayloadSchema.parse(request.body);
-  const lower = payload.message.toLowerCase();
-  const calendarConnected = store.getApps().some((item) => item.slug === 'googlecalendar' && item.connected);
+  const ctx = { userId: user.id, store };
+  const registry = await buildRegistry({ ctx, composio: composioRuntime, message: payload.message });
+  let assembled = '';
+  let connectionRequired: { appSlug: string; oauthUrl?: string | null } | null = null;
+  let createdEvent: { eventId: string; title: string; startIso: string } | null = null;
+  let activityCreated = false;
 
-  if ((lower.includes('today') || lower.includes('tomorrow') || lower.includes('calendar')) && !lower.includes('schedule')) {
-    if (!calendarConnected) {
-      return reply.send({
-        assistantMessage: 'Connect Calendar in Apps first and I can read your schedule.',
-        action: {
-          type: 'connection_required',
-          appSlug: 'googlecalendar',
-          toolName: 'GOOGLECALENDAR_FIND_EVENTS',
-        },
-      });
-    }
-
-    const targetOffset = lower.includes('tomorrow') ? 1 : 0;
-    const events = store.getCalendarEventsForUser(user.id).filter((event) => {
-      const date = new Date(event.startIso);
-      const target = new Date();
-      target.setDate(target.getDate() + targetOffset);
-      return date.toDateString() === target.toDateString();
-    });
-
-    await store.addActivity({
-      title: 'Checked calendar',
-      subtitle: payload.message,
-      pip: 'calendar',
-      color: '#F5BC1E',
-    });
-
-    const assistantMessage = events.length === 0
-      ? `You're clear ${targetOffset === 1 ? 'tomorrow' : 'today'}.`
-      : `${targetOffset === 1 ? 'Tomorrow' : 'Today'} you have ${events.length} event${events.length === 1 ? '' : 's'}: ${events.map((event) => `${event.title} at ${new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(event.startIso))}`).join(', ')}.`;
-
-    return reply.send({
-      assistantMessage,
-      action: {
-        type: 'calendar_read',
-        appSlug: 'googlecalendar',
-        toolName: 'GOOGLECALENDAR_FIND_EVENTS',
-      },
-      events,
-      activityCreated: true,
-    });
-  }
-
-  if (lower.includes('schedule') || lower.includes('meeting') || lower.includes('lunch') || lower.includes('book')) {
-    if (!calendarConnected) {
-      return reply.send({
-        assistantMessage: 'Connect Calendar in Apps first and I can create events for you.',
-        action: {
-          type: 'connection_required',
-          appSlug: 'googlecalendar',
-          toolName: 'GOOGLECALENDAR_CREATE_EVENT',
-        },
-      });
-    }
-
-    const draft = buildEventDraft(lower);
-    const event = await store.createCalendarEvent(user.id, draft);
-    await store.addActivity({
-      title: 'Created calendar event',
-      subtitle: `${event.title} · ${new Intl.DateTimeFormat('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(event.startIso))}`,
-      pip: 'checkmark',
-      color: '#3BB273',
-    });
-
-    return reply.send({
-      assistantMessage: `Done — I scheduled ${event.title} for ${new Intl.DateTimeFormat('en-US', { weekday: 'long', hour: 'numeric', minute: '2-digit' }).format(new Date(event.startIso))}.`,
-      action: {
-        type: 'calendar_create',
-        appSlug: 'googlecalendar',
-        toolName: 'GOOGLECALENDAR_CREATE_EVENT',
-      },
-      createdEvent: event,
-      activityCreated: true,
-    });
-  }
-
-  await store.addActivity({
-    title: 'Handled request',
-    subtitle: payload.message,
-    pip: 'cool',
-    color: '#3B82F6',
-  });
-
-  return reply.send({
-    assistantMessage: "Coo! I can already help with Calendar reads and creates, and I'll get smarter as we wire more tools in.",
-    action: {
-      type: 'general_reply',
-      appSlug: null,
-      toolName: null,
+  const bufferingWriter = {
+    send(event: ChatEvent) {
+      if (event.type === 'token') assembled += event.text;
+      if (event.type === 'final' && event.content) assembled = event.content;
+      const meta = (event as unknown as { meta?: { kind: string; appSlug?: string; oauthUrl?: string | null; eventId?: string; title?: string; startIso?: string } }).meta;
+      if (meta?.kind === 'connection_required' && meta.appSlug) {
+        connectionRequired = { appSlug: meta.appSlug, oauthUrl: meta.oauthUrl ?? null };
+      }
+      if (meta?.kind === 'calendar_event_created' && meta.eventId && meta.title && meta.startIso) {
+        createdEvent = { eventId: meta.eventId, title: meta.title, startIso: meta.startIso };
+        activityCreated = true;
+      }
     },
+    close() {},
+  };
+  await runChatTurn({
+    provider: llmProvider,
+    registry,
+    ctx,
+    userMessage: payload.message,
+    writer: bufferingWriter,
   });
+  const conn = connectionRequired as { appSlug: string; oauthUrl?: string | null } | null;
+  const evt = createdEvent as { eventId: string; title: string; startIso: string } | null;
+  const action = conn
+    ? { type: 'connection_required', appSlug: conn.appSlug, toolName: null, oauthUrl: conn.oauthUrl ?? null }
+    : evt
+    ? { type: 'calendar_create', appSlug: 'googlecalendar', toolName: 'calendar_create_event', createdEvent: evt }
+    : { type: 'general_reply', appSlug: null, toolName: null };
+  return reply.send({ assistantMessage: assembled, action, activityCreated });
+});
+
+app.post('/chat/clear', async (request, reply) => {
+  const user = getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  store.clearHistory(user.id);
+  return reply.send({ ok: true });
+});
+
+app.delete('/me', async (request, reply) => {
+  const user = getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  await store.deleteAccount(user.id);
+  store.clearHistory(user.id);
+  return reply.status(204).send();
 });
 
 app.get('/briefing/today', async (request, reply) => {
@@ -325,7 +288,7 @@ app.get('/activity', async (request, reply) => {
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  return reply.send({ items: store.getActivities() });
+  return reply.send({ items: store.getActivities(user.id) });
 });
 
 app.get('/flows', async (request, reply) => {
@@ -333,7 +296,7 @@ app.get('/flows', async (request, reply) => {
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  return reply.send({ items: store.getFlows() });
+  return reply.send({ items: store.getFlows(user.id) });
 });
 
 app.post('/flows', async (request, reply) => {
@@ -356,7 +319,7 @@ app.patch('/flows/:id', async (request, reply) => {
   if (!flow) {
     return reply.status(404).send({ error: 'Flow not found.' });
   }
-  await store.addActivity({
+  await store.addActivity(user.id, {
     title: payload.active ? 'Enabled flow' : 'Paused flow',
     subtitle: flow.title,
     pip: payload.active ? 'clap' : 'sad',

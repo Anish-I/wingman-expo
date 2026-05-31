@@ -14,6 +14,7 @@
       "backgroundColor": "#FBF5E9"
     },
     "ios": {
+      "bundleIdentifier": "com.aivat.wingman",
       "supportsTablet": true
     },
     "android": {
@@ -30,7 +31,9 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-dev-client",
+      "expo-router",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true

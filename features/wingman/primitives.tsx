@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import React from 'react';
 import {
@@ -8,6 +9,12 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
+import Animated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useDerivedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { PipVariant } from '@/features/wingman/data';
@@ -57,39 +64,42 @@ const pipAssets: Record<PipVariant, number> = {
   worried: require('@/assets/pip/pip-worried.png'),
 };
 
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+
 const iconMap = {
-  search: { sf: 'magnifyingglass', fallback: '⌕' },
-  sparkles: { sf: 'sparkles', fallback: '✦' },
-  mic: { sf: 'mic.fill', fallback: '◉' },
-  mail: { sf: 'envelope.fill', fallback: '✉' },
-  time: { sf: 'clock.fill', fallback: '⏰' },
-  music: { sf: 'music.note', fallback: '♪' },
-  plus: { sf: 'plus', fallback: '+' },
-  'arrow-down': { sf: 'arrow.down', fallback: '↓' },
-  'arrow-up': { sf: 'arrow.up', fallback: '↑' },
-  'arrow-right': { sf: 'arrow.right', fallback: '→' },
-  'chevron-left': { sf: 'chevron.left', fallback: '‹' },
-  'chevron-right': { sf: 'chevron.right', fallback: '›' },
-  ellipsis: { sf: 'ellipsis', fallback: '⋯' },
-  checkmark: { sf: 'checkmark', fallback: '✓' },
-  'lock-closed': { sf: 'lock.fill', fallback: '🔒' },
-  'eye-off': { sf: 'eye.slash.fill', fallback: '🙈' },
-  trash: { sf: 'trash.fill', fallback: '🗑' },
-  home: { sf: 'house.fill', fallback: '⌂' },
-  chat: { sf: 'message.fill', fallback: '💬' },
-  activity: { sf: 'clock.arrow.circlepath', fallback: '◎' },
-  flows: { sf: 'wand.and.stars', fallback: '✦' },
-  settings: { sf: 'gearshape.fill', fallback: '⚙' },
-  moon: { sf: 'moon.fill', fallback: '☾' },
-  sun: { sf: 'sun.max.fill', fallback: '☀' },
-  notifications: { sf: 'bell.fill', fallback: '🔔' },
-  'shield-checkmark': { sf: 'shield.checkered', fallback: '🛡' },
-  'help-circle': { sf: 'questionmark.circle.fill', fallback: '?' },
-  phone: { sf: 'phone.fill', fallback: '✆' },
-  apps: { sf: 'square.grid.2x2.fill', fallback: '▦' },
-  apple: { sf: 'apple.logo', fallback: '' },
-  google: { sf: 'g.circle.fill', fallback: 'G' },
-} as const;
+  search: { ion: 'search', fallback: '⌕' },
+  sparkles: { ion: 'sparkles', fallback: '✦' },
+  mic: { ion: 'mic', fallback: '◉' },
+  mail: { ion: 'mail', fallback: '✉' },
+  time: { ion: 'time', fallback: '⏰' },
+  music: { ion: 'musical-notes', fallback: '♪' },
+  plus: { ion: 'add', fallback: '+' },
+  'arrow-down': { ion: 'arrow-down', fallback: '↓' },
+  'arrow-up': { ion: 'arrow-up', fallback: '↑' },
+  'arrow-right': { ion: 'arrow-forward', fallback: '→' },
+  'chevron-left': { ion: 'chevron-back', fallback: '‹' },
+  'chevron-right': { ion: 'chevron-forward', fallback: '›' },
+  edit: { ion: 'create-outline', fallback: '✎' },
+  ellipsis: { ion: 'ellipsis-horizontal', fallback: '⋯' },
+  checkmark: { ion: 'checkmark', fallback: '✓' },
+  'lock-closed': { ion: 'lock-closed', fallback: '🔒' },
+  'eye-off': { ion: 'eye-off', fallback: '🙈' },
+  trash: { ion: 'trash', fallback: '🗑' },
+  home: { ion: 'home', fallback: '⌂' },
+  chat: { ion: 'chatbubble-ellipses', fallback: '💬' },
+  activity: { ion: 'time', fallback: '◎' },
+  flows: { ion: 'flash', fallback: '✦' },
+  settings: { ion: 'settings', fallback: '⚙' },
+  moon: { ion: 'moon', fallback: '☾' },
+  sun: { ion: 'sunny', fallback: '☀' },
+  notifications: { ion: 'notifications', fallback: '🔔' },
+  'shield-checkmark': { ion: 'shield-checkmark', fallback: '🛡' },
+  'help-circle': { ion: 'help-circle', fallback: '?' },
+  phone: { ion: 'call', fallback: '✆' },
+  apps: { ion: 'grid', fallback: '▦' },
+  apple: { ion: 'logo-apple', fallback: '' },
+  google: { ion: 'logo-google', fallback: 'G' },
+} satisfies Record<string, { ion: IoniconName; fallback: string }>;
 
 type IconName = keyof typeof iconMap;
 
@@ -165,39 +175,22 @@ export function IconGlyph({
   style?: TextStyle | ImageStyle;
 }) {
   const icon = iconMap[name];
-  const canUseSfSymbol = process.env.EXPO_OS === 'ios';
-
-  if (canUseSfSymbol) {
-    return (
-      <Image
-        source={`sf:${icon.sf}`}
-        contentFit="contain"
-        style={[
-          {
-            width: size,
-            height: size,
-            tintColor: color,
-          },
-          style as ImageStyle,
-        ]}
-      />
-    );
-  }
 
   return (
-    <Text
+    <Ionicons
+      accessible={false}
+      importantForAccessibility="no"
+      name={icon.ion}
+      color={color}
+      size={size}
       style={[
         {
-          color,
-          fontSize: size * 0.85,
-          fontWeight: '700',
           textAlign: 'center',
           includeFontPadding: false,
         },
         style as TextStyle,
-      ]}>
-      {icon.fallback}
-    </Text>
+      ]}
+    />
   );
 }
 
@@ -309,6 +302,7 @@ export function WingmanButton({
           flexDirection: 'row',
           gap: 8,
           width: fullWidth ? '100%' : undefined,
+          position: 'relative',
           backgroundColor: palette.backgroundColor,
           borderColor: palette.borderColor,
           boxShadow: palette.shadow,
@@ -318,7 +312,14 @@ export function WingmanButton({
         },
         style,
       ]}>
-      {iconLeft ? <IconGlyph name={iconLeft} color={palette.textColor} size={18} /> : null}
+      {iconLeft ? (
+        <IconGlyph
+          name={iconLeft}
+          color={palette.textColor}
+          size={18}
+          style={fullWidth ? { position: 'absolute', left: 18 } : undefined}
+        />
+      ) : null}
       <Text
         style={{
           color: palette.textColor,
@@ -326,10 +327,19 @@ export function WingmanButton({
           fontWeight: '800',
           fontSize: 16,
           letterSpacing: 0.1,
+          textAlign: 'center',
+          paddingHorizontal: fullWidth && (iconLeft || iconRight) ? 24 : 0,
         }}>
         {children}
       </Text>
-      {iconRight ? <IconGlyph name={iconRight} color={palette.textColor} size={18} /> : null}
+      {iconRight ? (
+        <IconGlyph
+          name={iconRight}
+          color={palette.textColor}
+          size={18}
+          style={fullWidth ? { position: 'absolute', right: 18 } : undefined}
+        />
+      ) : null}
     </Pressable>
   );
 }
@@ -407,30 +417,61 @@ export function WingmanToggle({
   onValueChange: (value: boolean) => void;
 }) {
   const { colors } = useWingman();
+  const progress = useDerivedValue(
+    () => withSpring(value ? 1 : 0, { damping: 16, stiffness: 220, mass: 0.6 }),
+    [value],
+  );
+
+  const trackStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(
+      progress.value,
+      [0, 1],
+      [colors.section, colors.sky500],
+    ),
+    borderColor: interpolateColor(
+      progress.value,
+      [0, 1],
+      [colors.borderStrong, colors.sky700],
+    ),
+  }));
+
+  const knobStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: progress.value * 18 }],
+  }));
 
   return (
     <Pressable
-      onPress={() => onValueChange(!value)}
-      style={{
-        width: 46,
-        height: 28,
-        borderRadius: 999,
-        borderWidth: 1.5,
-        borderColor: value ? colors.sky700 : colors.borderStrong,
-        backgroundColor: value ? colors.sky500 : colors.section,
-        padding: 2,
-        justifyContent: 'center',
-        borderCurve: 'continuous',
-      }}>
-      <View
-        style={{
-          width: 22,
-          height: 22,
-          borderRadius: 999,
-          backgroundColor: '#FFFFFF',
-          transform: [{ translateX: value ? 18 : 0 }],
-        }}
-      />
+      onPress={(event) => {
+        event.stopPropagation();
+        onValueChange(!value);
+      }}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}>
+      <Animated.View
+        style={[
+          {
+            width: 46,
+            height: 28,
+            borderRadius: 999,
+            borderWidth: 1.5,
+            padding: 2,
+            justifyContent: 'center',
+            borderCurve: 'continuous',
+          },
+          trackStyle,
+        ]}>
+        <Animated.View
+          style={[
+            {
+              width: 22,
+              height: 22,
+              borderRadius: 999,
+              backgroundColor: '#FFFFFF',
+            },
+            knobStyle,
+          ]}
+        />
+      </Animated.View>
     </Pressable>
   );
 }
@@ -586,7 +627,7 @@ export function ScreenHeader({
   return (
     <View
       style={{
-        paddingTop: insets.top + 10,
+        paddingTop: Math.max(insets.top + 14, 18),
         paddingHorizontal: wingmanLayout.screenPadding,
         paddingBottom: 16,
         gap: 10,

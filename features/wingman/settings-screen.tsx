@@ -1,9 +1,13 @@
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import * as WebBrowser from 'expo-web-browser';
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWingman } from '@/features/wingman/provider';
+import { wingmanSupportLinks } from '@/features/wingman/data';
 import {
   IconGlyph,
   ScreenHeader,
@@ -16,8 +20,11 @@ import {
 } from '@/features/wingman/primitives';
 import { withAlpha, wingmanFonts, wingmanLayout } from '@/features/wingman/theme';
 
+const quietHourOptions = ['10pm - 7am', '9pm - 6am', '11pm - 8am', 'Off'] as const;
+
 export function SettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const {
     colors,
     currentUser,
@@ -25,9 +32,44 @@ export function SettingsScreen() {
     settings,
     setMemoryEnabled,
     setPushEnabled,
+    setQuietHours,
     setThemeMode,
     themeMode,
+    deleteAccount,
   } = useWingman();
+
+  const openLink = React.useCallback(async (url: string) => {
+    try {
+      await WebBrowser.openBrowserAsync(url);
+    } catch {
+      Linking.openURL(url).catch(() => Alert.alert('Could not open link.'));
+    }
+  }, []);
+
+  const onDeleteAccount = React.useCallback(() => {
+    Alert.alert(
+      'Delete your Wingman account?',
+      "This removes Pip's memory of you, your apps and your flows. This cannot be undone.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            await deleteAccount();
+          },
+        },
+      ],
+    );
+  }, [deleteAccount]);
+  const cycleQuietHours = React.useCallback(async () => {
+    await Haptics.selectionAsync();
+    const currentIndex = quietHourOptions.indexOf(settings.quietHours as (typeof quietHourOptions)[number]);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % quietHourOptions.length : 0;
+    setQuietHours(quietHourOptions[nextIndex]!);
+  }, [setQuietHours, settings.quietHours]);
+
   const isDark = resolvedTheme === 'dark';
   const profileName = currentUser?.name ?? 'Sam Ortega';
   const profilePhone = currentUser?.phone ?? '+1 (555) 123-4567';
@@ -35,14 +77,15 @@ export function SettingsScreen() {
 
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
+      contentInsetAdjustmentBehavior="never"
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{
-        paddingBottom: 140,
+        paddingBottom: insets.bottom + 140,
         gap: 18,
       }}>
       <ScreenHeader title="Settings" />
 
+      <Animated.View entering={FadeInDown.duration(380).springify().damping(18)}>
       <StickerCard
         backgroundColor={isDark ? colors.cardAlt : colors.card}
         borderColor={isDark ? colors.borderStrong : colors.sky200}
@@ -95,7 +138,9 @@ export function SettingsScreen() {
         </View>
         <IconGlyph name="chevron-right" color={colors.fgSecondary} size={18} />
       </StickerCard>
+      </Animated.View>
 
+      <Animated.View entering={FadeInDown.delay(60).duration(380).springify().damping(18)}>
       <SectionGroup label="Preferences">
         <SettingsRow
           icon="notifications"
@@ -116,9 +161,14 @@ export function SettingsScreen() {
           label="Quiet hours"
           color={colors.lav500}
           value={settings.quietHours}
+          onPress={() => {
+            void cycleQuietHours();
+          }}
         />
       </SectionGroup>
+      </Animated.View>
 
+      <Animated.View entering={FadeInDown.delay(120).duration(380).springify().damping(18)}>
       <SectionGroup label="Appearance">
         <SettingsRow
           icon={resolvedTheme === 'dark' ? 'moon' : 'sun'}
@@ -141,7 +191,9 @@ export function SettingsScreen() {
           />
         </View>
       </SectionGroup>
+      </Animated.View>
 
+      <Animated.View entering={FadeInDown.delay(180).duration(380).springify().damping(18)}>
       <SectionGroup label="Privacy">
         <SettingsRow
           icon="shield-checkmark"
@@ -168,16 +220,36 @@ export function SettingsScreen() {
           label="Delete account"
           color={colors.coral500}
           destructive
+          onPress={onDeleteAccount}
         />
       </SectionGroup>
+      </Animated.View>
 
+      <Animated.View entering={FadeInDown.delay(240).duration(380).springify().damping(18)}>
       <SectionGroup label="Support">
-        <SettingsRow icon="help-circle" label="Help center" color={colors.coral500} />
-        <SettingsRow icon="mail" label="Contact Pip's humans" color={colors.sky500} />
-        <SettingsRow icon="shield-checkmark" label="Privacy policy" color={colors.mint500} />
+        <SettingsRow
+          icon="help-circle"
+          label="Help center"
+          color={colors.coral500}
+          onPress={() => openLink(wingmanSupportLinks.helpCenter)}
+        />
+        <SettingsRow
+          icon="mail"
+          label="Contact Pip's humans"
+          color={colors.sky500}
+          onPress={() => Linking.openURL(`mailto:${wingmanSupportLinks.contactEmail}?subject=Hello%20Pip`)}
+        />
+        <SettingsRow
+          icon="shield-checkmark"
+          label="Privacy policy"
+          color={colors.mint500}
+          onPress={() => openLink(wingmanSupportLinks.privacyPolicy)}
+        />
       </SectionGroup>
+      </Animated.View>
 
       {__DEV__ ? (
+        <Animated.View entering={FadeInDown.delay(300).duration(380).springify().damping(18)}>
         <SectionGroup label="Developer">
           <SettingsRow
             icon="chat"
@@ -192,6 +264,7 @@ export function SettingsScreen() {
             value="sam@wingman.dev"
           />
         </SectionGroup>
+        </Animated.View>
       ) : null}
 
       <Pressable style={{ paddingHorizontal: wingmanLayout.screenPadding }}>
@@ -203,7 +276,7 @@ export function SettingsScreen() {
             fontWeight: '700',
             textAlign: 'center',
           }}>
-          Wingman v2.0 · Made with pigeons in Brooklyn
+          Wingman v2.0 · Made in Brooklyn
         </Text>
       </Pressable>
     </ScrollView>

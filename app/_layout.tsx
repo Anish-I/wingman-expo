@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
 import { useWindowDimensions, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import 'react-native-reanimated';
 
 import { WingmanProvider, useWingman } from '@/features/wingman/provider';
@@ -46,9 +47,11 @@ export default function RootLayout() {
   }
 
   return (
-    <WingmanProvider>
-      <RootLayoutNav />
-    </WingmanProvider>
+    <SafeAreaProvider>
+      <WingmanProvider>
+        <RootLayoutNav />
+      </WingmanProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -85,7 +88,11 @@ function RootLayoutNav() {
 
   return (
     <ThemeProvider value={navigationTheme}>
-      <StatusBar style={resolvedTheme === 'dark' ? 'light' : 'dark'} />
+      <StatusBar
+        style={resolvedTheme === 'dark' ? 'light' : 'dark'}
+        translucent
+        backgroundColor="transparent"
+      />
       <View
         style={{
           flex: 1,
@@ -124,6 +131,7 @@ function RootLayoutNav() {
         <Stack.Screen name="create-account" />
         <Stack.Screen name="ui-critique" />
         <Stack.Screen name="apps" />
+        <Stack.Screen name="flow-builder" />
         <Stack.Screen name="(tabs)" />
       </Stack>
         </View>

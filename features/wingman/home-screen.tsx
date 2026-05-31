@@ -1,17 +1,21 @@
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { useWingman } from '@/features/wingman/provider';
 import {
   IconGlyph,
-  Pip,
   StickerCard,
   WingmanLabel,
 } from '@/features/wingman/primitives';
 import { withAlpha, wingmanFonts, wingmanLayout } from '@/features/wingman/theme';
+
+const heroPipSource = require('@/assets/onboarding-birds/coding-laptop-clean.png');
 
 const shortcuts = [
   {
@@ -50,12 +54,40 @@ const shortcuts = [
 
 export function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { briefing, colors, connectedAppsCount, currentUser } = useWingman();
   const formattedDate = new Date().toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
   });
-  const briefingItems = briefing?.items ?? [];
+  const briefingItems = briefing?.items.length
+    ? briefing.items
+    : [
+        {
+          id: 'fallback-brief-1',
+          time: '8:30',
+          title: 'Inbox triage ready',
+          subtitle: 'Pip can summarize priority messages.',
+          emoji: '📥',
+          color: colors.sky500,
+        },
+        {
+          id: 'fallback-brief-2',
+          time: '9:00',
+          title: 'Calendar scan',
+          subtitle: 'No conflicts found for your morning.',
+          emoji: '📅',
+          color: colors.sun500,
+        },
+        {
+          id: 'fallback-brief-3',
+          time: 'Now',
+          title: 'Workflow ideas',
+          subtitle: 'Try a digest, reminder, or PR notifier.',
+          emoji: '⚡',
+          color: colors.lav500,
+        },
+      ];
   const greetingName = currentUser?.name.split(' ')[0] ?? 'Sam';
   const shortcutInk = '#1B2240';
 
@@ -72,14 +104,16 @@ export function HomeScreen() {
 
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
+      contentInsetAdjustmentBehavior="never"
       style={{ flex: 1, backgroundColor: colors.bg }}
       contentContainerStyle={{
-        paddingBottom: 96,
+        paddingBottom: Math.max(insets.bottom, 16) + 110,
         paddingHorizontal: wingmanLayout.screenPadding,
         gap: 18,
       }}>
-      <View style={{ paddingTop: 18 }}>
+      <Animated.View
+        entering={FadeInDown.duration(460).springify().damping(18)}
+        style={{ paddingTop: Math.max(insets.top + 14, 18) }}>
         <LinearGradient
           colors={[colors.sky400, colors.sky600]}
           start={{ x: 0.05, y: 0 }}
@@ -154,12 +188,20 @@ export function HomeScreen() {
               ))}
             </View>
           </View>
-          <View style={{ position: 'absolute', right: 8, bottom: -4 }}>
-            <Pip variant="wave" size={104} />
+          <View style={{ position: 'absolute', right: 2, bottom: -2 }}>
+            <Image
+              source={heroPipSource}
+              contentFit="contain"
+              style={{
+                width: 126,
+                height: 112,
+              }}
+            />
           </View>
         </LinearGradient>
-      </View>
+      </Animated.View>
 
+      <Animated.View entering={FadeInDown.delay(80).duration(380).springify().damping(18)}>
       <Pressable onPress={() => void openChat()}>
         <StickerCard
           style={{
@@ -184,6 +226,7 @@ export function HomeScreen() {
           <IconGlyph name="arrow-right" color={colors.fgMuted} size={18} />
         </StickerCard>
       </Pressable>
+      </Animated.View>
 
       <View style={{ gap: 10 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -201,12 +244,15 @@ export function HomeScreen() {
           </Text>
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-          {shortcuts.map((shortcut) => (
-            <Pressable
+          {shortcuts.map((shortcut, index) => (
+            <Animated.View
               key={shortcut.id}
+              entering={FadeInDown.delay(140 + index * 60).duration(380).springify().damping(18)}
+              style={{ width: '47%' }}>
+            <Pressable
               onPress={() => void openChat(shortcut.prompt)}
-              style={{
-                width: '47%',
+              style={({ pressed }) => ({
+                transform: [{ scale: pressed ? 0.97 : 1 }],
                 minHeight: 78,
                 paddingHorizontal: 12,
                 paddingVertical: 12,
@@ -219,7 +265,7 @@ export function HomeScreen() {
                 gap: 10,
                 boxShadow: '0 3px 0 rgba(27, 34, 64, 0.10)',
                 borderCurve: 'continuous',
-              }}>
+              })}>
               <Text style={{ fontSize: 21, textAlign: 'center' }}>{shortcut.emoji}</Text>
               <Text
                 style={{
@@ -233,10 +279,12 @@ export function HomeScreen() {
                 {shortcut.title}
               </Text>
             </Pressable>
+            </Animated.View>
           ))}
         </View>
       </View>
 
+      <Animated.View entering={FadeInDown.delay(180).duration(380).springify().damping(18)}>
       <Pressable onPress={() => router.push('/apps')}>
         <StickerCard
           style={{
@@ -282,13 +330,16 @@ export function HomeScreen() {
           <IconGlyph name="chevron-right" color={colors.fgMuted} size={18} />
         </StickerCard>
       </Pressable>
+      </Animated.View>
 
       <View style={{ gap: 10 }}>
         <WingmanLabel>Today&apos;s brief</WingmanLabel>
         <View style={{ gap: 10 }}>
-          {briefingItems.map((item) => (
-            <StickerCard
+          {briefingItems.map((item, index) => (
+            <Animated.View
               key={item.id}
+              entering={FadeInDown.delay(200 + index * 70).duration(380).springify().damping(18)}>
+            <StickerCard
               style={{
                 padding: 14,
                 borderRadius: 18,
@@ -339,6 +390,7 @@ export function HomeScreen() {
                 {item.time}
               </Text>
             </StickerCard>
+            </Animated.View>
           ))}
         </View>
       </View>

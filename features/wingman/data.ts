@@ -61,7 +61,16 @@ export type ChatMessage = {
   from: 'pip' | 'user';
   text: string;
   status?: string;
+  streaming?: boolean;
+  toolHints?: string[];
+  oauthCta?: { app: string; url: string };
 };
+
+export const wingmanSupportLinks = {
+  helpCenter: 'https://wingman.dev/help',
+  privacyPolicy: 'https://wingman.dev/privacy',
+  contactEmail: 'pip@wingman.dev',
+} as const;
 
 export type AppIntegration = {
   id: string;
@@ -240,6 +249,16 @@ export const initialFlows: FlowItem[] = [
     trigger: 'Weekdays 9:20 AM',
     runs: 0,
     color: palette.lav500,
+    active: false,
+  },
+  {
+    id: 'sample-inbox-triage',
+    emoji: '📬',
+    title: 'Sample: inbox triage',
+    description: 'Summarize urgent Gmail threads and post a Slack digest',
+    trigger: 'Weekdays 8:30 AM',
+    runs: 0,
+    color: palette.mint500,
     active: false,
   },
   {
