@@ -5,8 +5,8 @@ import type { SSEWriter } from './sse.js';
 
 const MAX_ITERATIONS = 6;
 
-function buildSystemPrompt(ctx: ToolContext): string {
-  const apps = ctx.store.getApps(ctx.userId);
+async function buildSystemPrompt(ctx: ToolContext): Promise<string> {
+  const apps = await ctx.store.getApps(ctx.userId);
   const connected = apps.filter((a) => a.connected).map((a) => a.name).join(', ') || 'none';
   const missing = apps.filter((a) => !a.connected).map((a) => a.name).join(', ') || 'none';
   return [
@@ -16,7 +16,7 @@ function buildSystemPrompt(ctx: ToolContext): string {
     'If a tool returns connection_required, call create_app_connection({ app: <slug> }) and surface the resulting link to the user.',
     'When the user shares a durable fact, preference, routine, or person, call the remember tool to save it. Use the memory below to personalize your replies.',
     '',
-    ctx.store.getMemoryContext(ctx.userId),
+    await ctx.store.getMemoryContext(ctx.userId),
   ].join('\n');
 }
 
@@ -31,11 +31,11 @@ export type OrchestratorParams = {
 export async function runChatTurn(params: OrchestratorParams): Promise<void> {
   const { provider, registry, ctx, userMessage, writer } = params;
 
-  ctx.store.appendHistory(ctx.userId, { role: 'user', content: userMessage });
+  await ctx.store.appendHistory(ctx.userId, { role: 'user', content: userMessage });
 
   const messages: ChatMessage[] = [
-    { role: 'system', content: buildSystemPrompt(ctx) },
-    ...ctx.store.getHistory(ctx.userId),
+    { role: 'system', content: await buildSystemPrompt(ctx) },
+    ...(await ctx.store.getHistory(ctx.userId)),
   ];
 
   for (let i = 0; i < MAX_ITERATIONS; i++) {
@@ -71,7 +71,7 @@ export async function runChatTurn(params: OrchestratorParams): Promise<void> {
     }
 
     const assistantMessage: ChatMessage = { role: 'assistant', content: assembled, toolCalls: calls.length ? calls : undefined };
-    ctx.store.appendHistory(ctx.userId, assistantMessage);
+    await ctx.store.appendHistory(ctx.userId, assistantMessage);
     messages.push(assistantMessage);
 
     if (!calls.length) {
@@ -84,7 +84,7 @@ export async function runChatTurn(params: OrchestratorParams): Promise<void> {
       try {
         const result = await registry.dispatch(call, ctx);
         const toolMessage: ChatMessage = { role: 'tool', toolCallId: call.id, name: call.name, content: result.output };
-        ctx.store.appendHistory(ctx.userId, toolMessage);
+        await ctx.store.appendHistory(ctx.userId, toolMessage);
         messages.push(toolMessage);
         const evt: ChatEvent = { type: 'tool_result', toolCallId: call.id, name: call.name, output: result.output };
         if (result.meta) (evt as unknown as { meta: unknown }).meta = result.meta;
@@ -92,7 +92,7 @@ export async function runChatTurn(params: OrchestratorParams): Promise<void> {
       } catch (err) {
         const message = (err as Error).message;
         const toolMessage: ChatMessage = { role: 'tool', toolCallId: call.id, name: call.name, content: `Error: ${message}` };
-        ctx.store.appendHistory(ctx.userId, toolMessage);
+        await ctx.store.appendHistory(ctx.userId, toolMessage);
         messages.push(toolMessage);
         writer.send({ type: 'tool_result', toolCallId: call.id, name: call.name, output: '', error: message });
       }

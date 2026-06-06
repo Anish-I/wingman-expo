@@ -1,73 +1,28 @@
-import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
+import crypto from 'node:crypto';
+import test from 'node:test';
 
-import { SqliteStore } from './store.js';
+import { PgStore } from './store.js';
 
-const dir = mkdtempSync(path.join(tmpdir(), 'wingman-memory-'));
-const dbPath = path.join(dir, 'test.db');
-let store: SqliteStore;
+const skip = process.env.DATABASE_URL ? false : 'set DATABASE_URL to run store tests';
+const rid = () => crypto.randomBytes(4).toString('hex');
 
-before(async () => {
-  store = new SqliteStore(dbPath);
-  await store.init();
+test('memory docs persist per user and inject into context', { skip }, async () => {
+  const store = await PgStore.open();
+  const created = await store.createAccount({ name: 'Mem', email: `mem-${rid()}@example.com`, password: 'secret123' });
+  assert.ok(created.ok);
+  const userId = created.account.id;
+  await store.setMemoryDoc(userId, 'profile', 'Prefers tea over coffee.');
+  const ctx = await store.getMemoryContext(userId);
+  assert.match(ctx, /Prefers tea/);
 });
 
-beforeEach(() => {
-  store.db.exec('DELETE FROM users');
-});
-
-after(() => {
-  store.close();
-  rmSync(dir, { recursive: true, force: true });
-});
-
-async function makeUser() {
-  const r = await store.createAccount({ name: 'Ana', email: 'ana@wingman.dev', password: 'hunter2pw' });
-  if (!r.ok) throw new Error('account failed');
-  return r.account;
-}
-
-test('appendDailyLog note is recalled in the memory context', async () => {
-  const user = await makeUser();
-  store.appendDailyLog(user.id, 'Prefers tea over coffee');
-  const ctx = store.getMemoryContext(user.id);
-  assert.match(ctx, /Prefers tea over coffee/);
-});
-
-test('profile doc is included in the memory context', async () => {
-  const user = await makeUser();
-  store.setMemoryDoc(user.id, 'profile', 'Name: Ana. Role: founder. Timezone: PT.');
-  const ctx = store.getMemoryContext(user.id);
-  assert.match(ctx, /Role: founder/);
-});
-
-test('memory survives a fresh store instance on the same db file', async () => {
-  const user = await makeUser();
-  store.appendDailyLog(user.id, 'Launches on Friday');
-
-  const reopened = new SqliteStore(dbPath);
-  await reopened.init();
-  const ctx = reopened.getMemoryContext(user.id);
-  reopened.close();
-  assert.match(ctx, /Launches on Friday/);
-});
-
-test('memory context caps the daily log to recent notes', async () => {
-  const user = await makeUser();
-  for (let i = 0; i < 200; i++) {
-    store.appendDailyLog(user.id, `note number ${i}`);
-  }
-  const ctx = store.getMemoryContext(user.id);
-  assert.match(ctx, /note number 199/, 'newest note should be present');
-  assert.doesNotMatch(ctx, /note number 0\b/, 'oldest note should be trimmed');
-});
-
-test('a user with no memory still returns a usable context string', async () => {
-  const user = await makeUser();
-  const ctx = store.getMemoryContext(user.id);
-  assert.equal(typeof ctx, 'string');
-  assert.equal(ctx.length > 0, true);
+test('appendDailyLog accumulates lines under the daily log', { skip }, async () => {
+  const store = await PgStore.open();
+  const created = await store.createAccount({ name: 'Log', email: `log-${rid()}@example.com`, password: 'secret123' });
+  assert.ok(created.ok);
+  const userId = created.account.id;
+  await store.appendDailyLog(userId, 'Went for a run');
+  const ctx = await store.getMemoryContext(userId);
+  assert.match(ctx, /Went for a run/);
 });

@@ -53,7 +53,7 @@ export async function buildRegistry(opts: {
 
   let composioTools: { definition: ToolDefinition; slug: string; toolkit: string }[] = [];
   if (composio.enabled) {
-    const connected = ctx.store.getApps(ctx.userId).filter((a) => a.connected).map((a) => a.slug);
+    const connected = (await ctx.store.getApps(ctx.userId)).filter((a) => a.connected).map((a) => a.slug);
     const toolkits = selectToolkits(connected, message);
     for (const toolkit of toolkits) {
       if (composioTools.length >= MAX_COMPOSIO_TOOLS) break;

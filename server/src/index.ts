@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
 
-import { SqliteStore } from './store.js';
+import { PgStore } from './store.js';
 import { buildUiCritique } from './ui-critique.js';
 import { pickProvider } from './llm/provider.js';
 import { createComposioRuntime } from './tools/composio.js';
@@ -19,6 +19,7 @@ loadEnv();
 const env = z.object({
   PORT: z.coerce.number().default(3002),
   FRONTEND_URL: z.string().default('http://localhost:8082'),
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL (Supabase Postgres connection string) is required.'),
   DEFAULT_LLM_PROVIDER: z.string().default('demo'),
   LLM_PROVIDER: z.string().optional(),
   LLM_MODEL: z.string().optional(),
@@ -28,7 +29,7 @@ const env = z.object({
 }).parse(process.env);
 
 const app = Fastify({ logger: true });
-const store = new SqliteStore();
+const store = await PgStore.open(env.DATABASE_URL);
 const llmProvider = pickProvider({
   LLM_PROVIDER: env.LLM_PROVIDER,
   LLM_MODEL: env.LLM_MODEL,
@@ -70,7 +71,7 @@ function authHeaderToken(header?: string) {
   return header.slice('Bearer '.length);
 }
 
-function getAuthedUser(request: { headers: Record<string, unknown> }) {
+async function getAuthedUser(request: { headers: Record<string, unknown> }) {
   const token = authHeaderToken(String(request.headers.authorization ?? ''));
   if (!token) {
     return null;
@@ -97,7 +98,6 @@ function serializeAuth(account: { id: string; name: string; email: string; phone
   };
 }
 
-await store.init();
 await app.register(cors, { origin: true });
 
 app.get('/health', async () => ({
@@ -126,7 +126,7 @@ app.post('/auth/demo/login', async (request, reply) => {
 });
 
 app.get('/me', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
@@ -134,28 +134,29 @@ app.get('/me', async (request, reply) => {
 });
 
 app.get('/apps', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   return reply.send({
     totalAvailable: 1003,
-    items: store.getApps(user.id),
+    items: await store.getApps(user.id),
   });
 });
 
 app.get('/apps/status', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  const connected = store.getApps(user.id).filter((item) => item.connected).map((item) => item.slug);
-  const missing = store.getApps(user.id).filter((item) => !item.connected).map((item) => item.slug);
+  const apps = await store.getApps(user.id);
+  const connected = apps.filter((item) => item.connected).map((item) => item.slug);
+  const missing = apps.filter((item) => !item.connected).map((item) => item.slug);
   return reply.send({ connected, missing });
 });
 
 app.post('/connect/create-connect-token', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
@@ -183,7 +184,7 @@ app.get('/connect/callback', async (request, reply) => {
 });
 
 app.delete('/connect/:app', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
@@ -191,7 +192,7 @@ app.delete('/connect/:app', async (request, reply) => {
 });
 
 app.post('/chat/stream', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
@@ -212,7 +213,7 @@ app.post('/chat/stream', async (request, reply) => {
 });
 
 app.post('/chat', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
@@ -257,50 +258,50 @@ app.post('/chat', async (request, reply) => {
 });
 
 app.post('/chat/clear', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  store.clearHistory(user.id);
+  await store.clearHistory(user.id);
   return reply.send({ ok: true });
 });
 
 app.delete('/me', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   await store.deleteAccount(user.id);
-  store.clearHistory(user.id);
+  await store.clearHistory(user.id);
   return reply.status(204).send();
 });
 
 app.get('/briefing/today', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  return reply.send(store.getBriefing(user.id));
+  return reply.send(await store.getBriefing(user.id));
 });
 
 app.get('/activity', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  return reply.send({ items: store.getActivities(user.id) });
+  return reply.send({ items: await store.getActivities(user.id) });
 });
 
 app.get('/flows', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  return reply.send({ items: store.getFlows(user.id) });
+  return reply.send({ items: await store.getFlows(user.id) });
 });
 
 app.post('/flows', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
@@ -309,7 +310,7 @@ app.post('/flows', async (request, reply) => {
 });
 
 app.patch('/flows/:id', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
@@ -329,7 +330,7 @@ app.patch('/flows/:id', async (request, reply) => {
 });
 
 app.post('/dev/ui-critique', async (request, reply) => {
-  const user = getAuthedUser(request);
+  const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }

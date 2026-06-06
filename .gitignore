@@ -51,3 +51,4 @@ ruvector.db
 # generated native folders
 /ios
 /android
+build_plan.md

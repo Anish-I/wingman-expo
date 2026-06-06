@@ -1,6 +1,4 @@
 import crypto from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import type {
   ActivityEvent,
@@ -10,14 +8,11 @@ import type {
   CurrentUser,
   Flow,
 } from './types.js';
-import { openDb, type DB } from './db/sqlite.js';
+import { openPg, closePg, type PgPool } from './db/postgres.js';
 import type { ChatMessage, ToolCall } from './llm/types.js';
 
 const HISTORY_LIMIT = 30;
 const DAILY_LOG_RECENT_LINES = 40;
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_DB_PATH = path.resolve(__dirname, '../.data/wingman.db');
 
 const DEMO_EMAIL = 'sam@wingman.dev';
 const DEMO_PASSWORD = 'pigeon123';
@@ -77,34 +72,44 @@ function toCurrentUser(row: UserRow): CurrentUser {
   return { id: row.id, name: row.name, email: row.email, phone: row.phone, tier: row.tier };
 }
 
-export class SqliteStore {
-  readonly db: DB;
+/**
+ * Postgres-backed store (Supabase-compatible). All methods are async.
+ *
+ * Migrated from the sync better-sqlite3 store. SQL is preserved nearly verbatim;
+ * the main changes are `?` -> `$n` placeholders and async query execution.
+ * Auth (scrypt + session tokens) is unchanged here and is swapped for Supabase
+ * Auth in Phase 1 task 2.2.
+ */
+export class PgStore {
+  private constructor(readonly pool: PgPool) {}
 
-  constructor(dbPath: string = DEFAULT_DB_PATH) {
-    this.db = openDb(dbPath);
+  /** Open the pool, ensure schema + demo seed. Pass a Supabase connection string. */
+  static async open(connectionString: string | undefined = process.env.DATABASE_URL): Promise<PgStore> {
+    if (!connectionString) {
+      throw new Error('DATABASE_URL is required (Supabase Postgres connection string).');
+    }
+    const pool = await openPg(connectionString);
+    const store = new PgStore(pool);
+    await store.seedDemoAccount();
+    return store;
   }
 
-  async init() {
-    this.seedDemoAccount();
+  async close() {
+    await closePg();
   }
 
-  close() {
-    this.db.close();
-  }
-
-  private seedDemoAccount() {
-    const existing = this.db.prepare('SELECT id FROM users WHERE lower(email) = lower(?)').get(DEMO_EMAIL) as
-      | { id: string }
-      | undefined;
-    if (existing) return;
+  private async seedDemoAccount() {
+    const existing = await this.pool.query('SELECT id FROM users WHERE lower(email) = lower($1)', [DEMO_EMAIL]);
+    if (existing.rows[0]) return;
 
     const id = 'user-sam';
-    this.db
-      .prepare('INSERT INTO users (id, name, email, password_hash, phone, tier, created_at) VALUES (?,?,?,?,?,?,?)')
-      .run(id, 'Sam Ortega', DEMO_EMAIL, hashPassword(DEMO_PASSWORD), '+1 (555) 123-4567', 'Pro', nowIso());
+    await this.pool.query(
+      'INSERT INTO users (id, name, email, password_hash, phone, tier, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [id, 'Sam Ortega', DEMO_EMAIL, hashPassword(DEMO_PASSWORD), '+1 (555) 123-4567', 'Pro', nowIso()],
+    );
 
     for (const slug of ['gmail', 'slack', 'github']) {
-      this.markConnected(id, slug);
+      await this.markConnected(id, slug);
     }
 
     const seedFlows: Array<Omit<Flow, 'id'>> = [
@@ -112,9 +117,10 @@ export class SqliteStore {
       { emoji: '💬', title: 'Standup nudge', description: 'Morning reminder before your first meeting', trigger: 'Weekdays 9:00 AM', runs: 5, color: '#8B7CF6', active: false, appSlug: 'googlecalendar' },
     ];
     for (const f of seedFlows) {
-      this.db
-        .prepare('INSERT INTO flows (id, user_id, emoji, title, description, trigger, runs, color, active, app_slug, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-        .run(randomId('flow'), id, f.emoji, f.title, f.description, f.trigger, f.runs, f.color, f.active ? 1 : 0, f.appSlug, nowIso());
+      await this.pool.query(
+        'INSERT INTO flows (id, user_id, emoji, title, description, trigger, runs, color, active, app_slug, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+        [randomId('flow'), id, f.emoji, f.title, f.description, f.trigger, f.runs, f.color, f.active, f.appSlug, nowIso()],
+      );
     }
 
     const today = new Date();
@@ -128,64 +134,66 @@ export class SqliteStore {
       { title: 'Ship launch post', start: makeDate(14, 15), end: makeDate(14, 45), subtitle: 'Draft ready · needs review', emoji: '🚀', color: '#8B7CF6' },
     ];
     for (const e of seedEvents) {
-      this.db
-        .prepare('INSERT INTO calendar_events (id, user_id, title, start_iso, end_iso, subtitle, emoji, color) VALUES (?,?,?,?,?,?,?,?)')
-        .run(randomId('event'), id, e.title, e.start, e.end, e.subtitle, e.emoji, e.color);
+      await this.pool.query(
+        'INSERT INTO calendar_events (id, user_id, title, start_iso, end_iso, subtitle, emoji, color) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+        [randomId('event'), id, e.title, e.start, e.end, e.subtitle, e.emoji, e.color],
+      );
     }
   }
 
-  private markConnected(userId: string, appSlug: string, connectionId?: string) {
-    this.db
-      .prepare(
-        `INSERT INTO app_connections (user_id, app_slug, connected_at, connection_id) VALUES (?,?,?,?)
-         ON CONFLICT(user_id, app_slug) DO UPDATE SET connected_at = excluded.connected_at, connection_id = excluded.connection_id`,
-      )
-      .run(userId, appSlug, nowIso(), connectionId ?? null);
+  private async markConnected(userId: string, appSlug: string, connectionId?: string) {
+    await this.pool.query(
+      `INSERT INTO app_connections (user_id, app_slug, connected_at, connection_id) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (user_id, app_slug) DO UPDATE SET connected_at = EXCLUDED.connected_at, connection_id = EXCLUDED.connection_id`,
+      [userId, appSlug, nowIso(), connectionId ?? null],
+    );
   }
 
   // --- users / auth ---
 
-  getUserByEmail(email: string): CurrentUser | null {
-    const row = this.db
-      .prepare('SELECT id, name, email, phone, tier FROM users WHERE lower(email) = lower(?)')
-      .get(email) as UserRow | undefined;
+  async getUserByEmail(email: string): Promise<CurrentUser | null> {
+    const res = await this.pool.query('SELECT id, name, email, phone, tier FROM users WHERE lower(email) = lower($1)', [email]);
+    const row = res.rows[0] as UserRow | undefined;
     return row ? toCurrentUser(row) : null;
   }
 
-  getUserBySession(token: string): CurrentUser | null {
-    const row = this.db
-      .prepare(
-        `SELECT u.id, u.name, u.email, u.phone, u.tier
-           FROM sessions s JOIN users u ON u.id = s.user_id
-          WHERE s.token = ?`,
-      )
-      .get(token) as UserRow | undefined;
+  async getUserBySession(token: string): Promise<CurrentUser | null> {
+    const res = await this.pool.query(
+      `SELECT u.id, u.name, u.email, u.phone, u.tier
+         FROM sessions s JOIN users u ON u.id = s.user_id
+        WHERE s.token = $1`,
+      [token],
+    );
+    const row = res.rows[0] as UserRow | undefined;
     return row ? toCurrentUser(row) : null;
   }
 
   async createAccount(input: { name: string; email: string; password: string }) {
     const email = input.email.trim().toLowerCase();
-    if (this.getUserByEmail(email)) {
+    if (await this.getUserByEmail(email)) {
       return { ok: false as const, error: 'That email already exists. Sign in instead.' };
     }
     const id = randomId('user');
-    this.db
-      .prepare('INSERT INTO users (id, name, email, password_hash, phone, tier, created_at) VALUES (?,?,?,?,?,?,?)')
-      .run(id, input.name.trim(), email, hashPassword(input.password), '+1 (555) 000-0000', 'Pro', nowIso());
-    return { ok: true as const, account: this.getUserByEmail(email)! };
+    await this.pool.query(
+      'INSERT INTO users (id, name, email, password_hash, phone, tier, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [id, input.name.trim(), email, hashPassword(input.password), '+1 (555) 000-0000', 'Pro', nowIso()],
+    );
+    return { ok: true as const, account: (await this.getUserByEmail(email))! };
   }
 
   async createSession(userId: string): Promise<string> {
     const token = crypto.randomBytes(24).toString('hex');
-    this.db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
-    this.db.prepare('INSERT INTO sessions (token, user_id, created_at) VALUES (?,?,?)').run(token, userId, nowIso());
+    await this.pool.query('DELETE FROM sessions WHERE user_id = $1', [userId]);
+    await this.pool.query('INSERT INTO sessions (token, user_id, created_at) VALUES ($1,$2,$3)', [token, userId, nowIso()]);
     return token;
   }
 
   async signIn(email: string, password: string) {
-    const row = this.db
-      .prepare('SELECT id, name, email, phone, tier, password_hash FROM users WHERE lower(email) = lower(?)')
-      .get(email) as (UserRow & { password_hash: string }) | undefined;
+    const res = await this.pool.query(
+      'SELECT id, name, email, phone, tier, password_hash FROM users WHERE lower(email) = lower($1)',
+      [email],
+    );
+    const row = res.rows[0] as (UserRow & { password_hash: string }) | undefined;
     if (!row || !verifyPassword(password, row.password_hash)) {
       return { ok: false as const, error: 'Incorrect email or password.' };
     }
@@ -194,17 +202,15 @@ export class SqliteStore {
   }
 
   async deleteAccount(userId: string) {
-    this.db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    await this.pool.query('DELETE FROM users WHERE id = $1', [userId]);
   }
 
   // --- apps / connections ---
 
-  getApps(userId: string): AppConnection[] {
+  async getApps(userId: string): Promise<AppConnection[]> {
+    const res = await this.pool.query('SELECT app_slug, connected_at FROM app_connections WHERE user_id = $1', [userId]);
     const connected = new Map(
-      (this.db.prepare('SELECT app_slug, connected_at FROM app_connections WHERE user_id = ?').all(userId) as Array<{
-        app_slug: string;
-        connected_at: string;
-      }>).map((r) => [r.app_slug, r.connected_at]),
+      (res.rows as Array<{ app_slug: string; connected_at: string }>).map((r) => [r.app_slug, r.connected_at]),
     );
     return APP_CATALOG.map((app) => ({
       ...app,
@@ -215,28 +221,26 @@ export class SqliteStore {
 
   async createConnectToken(userId: string, appSlug: string) {
     const token = randomId('connect');
-    this.db
-      .prepare('INSERT INTO connect_tokens (token, user_id, app_slug, created_at) VALUES (?,?,?,?)')
-      .run(token, userId, appSlug, nowIso());
+    await this.pool.query(
+      'INSERT INTO connect_tokens (token, user_id, app_slug, created_at) VALUES ($1,$2,$3,$4)',
+      [token, userId, appSlug, nowIso()],
+    );
     return token;
   }
 
   async consumeConnectToken(token: string) {
-    const row = this.db.prepare('SELECT token, user_id, app_slug FROM connect_tokens WHERE token = ?').get(token) as
-      | { token: string; user_id: string; app_slug: string }
-      | undefined;
+    const res = await this.pool.query('SELECT token, user_id, app_slug FROM connect_tokens WHERE token = $1', [token]);
+    const row = res.rows[0] as { token: string; user_id: string; app_slug: string } | undefined;
     if (!row) return null;
-    this.db.prepare('DELETE FROM connect_tokens WHERE token = ?').run(token);
+    await this.pool.query('DELETE FROM connect_tokens WHERE token = $1', [token]);
     return { token: row.token, userId: row.user_id, appSlug: row.app_slug };
   }
 
   async connectApp(userId: string, appSlug: string, connectionId?: string) {
-    this.markConnected(userId, appSlug, connectionId);
+    await this.markConnected(userId, appSlug, connectionId);
     if (appSlug === 'googlecalendar') {
-      const has = this.db
-        .prepare("SELECT 1 FROM activities WHERE user_id = ? AND title = 'Connected Calendar'")
-        .get(userId);
-      if (!has) {
+      const has = await this.pool.query("SELECT 1 FROM activities WHERE user_id = $1 AND title = 'Connected Calendar'", [userId]);
+      if (!has.rows[0]) {
         await this.addActivity(userId, {
           title: 'Connected Calendar',
           subtitle: 'Google Calendar is ready for reads and writes',
@@ -249,10 +253,12 @@ export class SqliteStore {
 
   // --- flows ---
 
-  getFlows(userId: string): Flow[] {
-    return (this.db
-      .prepare('SELECT id, emoji, title, description, trigger, runs, color, active, app_slug AS appSlug FROM flows WHERE user_id = ? ORDER BY created_at DESC')
-      .all(userId) as Array<Omit<Flow, 'active'> & { active: number }>).map((f) => ({ ...f, active: Boolean(f.active) }));
+  async getFlows(userId: string): Promise<Flow[]> {
+    const res = await this.pool.query(
+      'SELECT id, emoji, title, description, trigger, runs, color, active, app_slug AS "appSlug" FROM flows WHERE user_id = $1 ORDER BY created_at DESC',
+      [userId],
+    );
+    return (res.rows as Array<Omit<Flow, 'active'> & { active: boolean }>).map((f) => ({ ...f, active: Boolean(f.active) }));
   }
 
   async createFlow(userId: string): Promise<Flow> {
@@ -267,42 +273,48 @@ export class SqliteStore {
       active: true,
       appSlug: 'googlecalendar',
     };
-    this.db
-      .prepare('INSERT INTO flows (id, user_id, emoji, title, description, trigger, runs, color, active, app_slug, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .run(flow.id, userId, flow.emoji, flow.title, flow.description, flow.trigger, flow.runs, flow.color, 1, flow.appSlug, nowIso());
+    await this.pool.query(
+      'INSERT INTO flows (id, user_id, emoji, title, description, trigger, runs, color, active, app_slug, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+      [flow.id, userId, flow.emoji, flow.title, flow.description, flow.trigger, flow.runs, flow.color, true, flow.appSlug, nowIso()],
+    );
     await this.addActivity(userId, { title: 'Created flow', subtitle: flow.title, pip: 'clap', color: '#3B82F6' });
     return flow;
   }
 
   async setFlowActive(flowId: string, active: boolean): Promise<Flow | null> {
-    const info = this.db.prepare('UPDATE flows SET active = ? WHERE id = ?').run(active ? 1 : 0, flowId);
-    if (info.changes === 0) return null;
-    const row = this.db
-      .prepare('SELECT id, emoji, title, description, trigger, runs, color, active, app_slug AS appSlug FROM flows WHERE id = ?')
-      .get(flowId) as (Omit<Flow, 'active'> & { active: number }) | undefined;
+    const res = await this.pool.query(
+      'UPDATE flows SET active = $1 WHERE id = $2 RETURNING id, emoji, title, description, trigger, runs, color, active, app_slug AS "appSlug"',
+      [active, flowId],
+    );
+    const row = res.rows[0] as (Omit<Flow, 'active'> & { active: boolean }) | undefined;
     return row ? { ...row, active: Boolean(row.active) } : null;
   }
 
   // --- activities ---
 
-  getActivities(userId: string): ActivityEvent[] {
-    return (this.db
-      .prepare('SELECT id, title, subtitle, pip, color, created_at AS createdAt FROM activities WHERE user_id = ? ORDER BY created_at DESC')
-      .all(userId) as Array<Omit<ActivityEvent, 'when'>>).map((item) => ({ ...item, when: relativeWhen(item.createdAt) }));
+  async getActivities(userId: string): Promise<ActivityEvent[]> {
+    const res = await this.pool.query(
+      'SELECT id, title, subtitle, pip, color, created_at AS "createdAt" FROM activities WHERE user_id = $1 ORDER BY created_at DESC',
+      [userId],
+    );
+    return (res.rows as Array<Omit<ActivityEvent, 'when'>>).map((item) => ({ ...item, when: relativeWhen(item.createdAt) }));
   }
 
   async addActivity(userId: string, input: Omit<ActivityEvent, 'id' | 'when' | 'createdAt'>) {
-    this.db
-      .prepare('INSERT INTO activities (id, user_id, title, subtitle, pip, color, created_at) VALUES (?,?,?,?,?,?,?)')
-      .run(randomId('activity'), userId, input.title, input.subtitle, input.pip, input.color, nowIso());
+    await this.pool.query(
+      'INSERT INTO activities (id, user_id, title, subtitle, pip, color, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [randomId('activity'), userId, input.title, input.subtitle, input.pip, input.color, nowIso()],
+    );
   }
 
   // --- calendar / briefing ---
 
-  getCalendarEventsForUser(userId: string): CalendarEvent[] {
-    return this.db
-      .prepare('SELECT id, user_id AS userId, title, start_iso AS startIso, end_iso AS endIso, subtitle, emoji, color FROM calendar_events WHERE user_id = ? ORDER BY start_iso ASC')
-      .all(userId) as CalendarEvent[];
+  async getCalendarEventsForUser(userId: string): Promise<CalendarEvent[]> {
+    const res = await this.pool.query(
+      'SELECT id, user_id AS "userId", title, start_iso AS "startIso", end_iso AS "endIso", subtitle, emoji, color FROM calendar_events WHERE user_id = $1 ORDER BY start_iso ASC',
+      [userId],
+    );
+    return res.rows as CalendarEvent[];
   }
 
   async createCalendarEvent(userId: string, input: { title: string; startIso: string; endIso: string; subtitle: string }) {
@@ -316,40 +328,39 @@ export class SqliteStore {
       emoji: '📆',
       color: '#F5BC1E',
     };
-    this.db
-      .prepare('INSERT INTO calendar_events (id, user_id, title, start_iso, end_iso, subtitle, emoji, color) VALUES (?,?,?,?,?,?,?,?)')
-      .run(event.id, userId, event.title, event.startIso, event.endIso, event.subtitle, event.emoji, event.color);
+    await this.pool.query(
+      'INSERT INTO calendar_events (id, user_id, title, start_iso, end_iso, subtitle, emoji, color) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+      [event.id, userId, event.title, event.startIso, event.endIso, event.subtitle, event.emoji, event.color],
+    );
     return event;
   }
 
   // --- memory (Obsidian-style markdown docs) ---
 
-  getMemoryDoc(userId: string, slug: string): string {
-    const row = this.db.prepare('SELECT content FROM memory_docs WHERE user_id = ? AND slug = ?').get(userId, slug) as
-      | { content: string }
-      | undefined;
+  async getMemoryDoc(userId: string, slug: string): Promise<string> {
+    const res = await this.pool.query('SELECT content FROM memory_docs WHERE user_id = $1 AND slug = $2', [userId, slug]);
+    const row = res.rows[0] as { content: string } | undefined;
     return row?.content ?? '';
   }
 
-  setMemoryDoc(userId: string, slug: string, content: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO memory_docs (user_id, slug, content, updated_at) VALUES (?,?,?,?)
-         ON CONFLICT(user_id, slug) DO UPDATE SET content = excluded.content, updated_at = excluded.updated_at`,
-      )
-      .run(userId, slug, content, nowIso());
+  async setMemoryDoc(userId: string, slug: string, content: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO memory_docs (user_id, slug, content, updated_at) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (user_id, slug) DO UPDATE SET content = EXCLUDED.content, updated_at = EXCLUDED.updated_at`,
+      [userId, slug, content, nowIso()],
+    );
   }
 
-  appendDailyLog(userId: string, note: string): void {
+  async appendDailyLog(userId: string, note: string): Promise<void> {
     const date = new Intl.DateTimeFormat('en-CA').format(new Date()); // YYYY-MM-DD
-    const existing = this.getMemoryDoc(userId, 'daily_log');
+    const existing = await this.getMemoryDoc(userId, 'daily_log');
     const line = `- ${date}: ${note.trim()}`;
-    this.setMemoryDoc(userId, 'daily_log', existing ? `${existing}\n${line}` : line);
+    await this.setMemoryDoc(userId, 'daily_log', existing ? `${existing}\n${line}` : line);
   }
 
-  getMemoryContext(userId: string): string {
-    const profile = this.getMemoryDoc(userId, 'profile').trim();
-    const log = this.getMemoryDoc(userId, 'daily_log').trim();
+  async getMemoryContext(userId: string): Promise<string> {
+    const profile = (await this.getMemoryDoc(userId, 'profile')).trim();
+    const log = (await this.getMemoryDoc(userId, 'daily_log')).trim();
     const recentLog = log ? log.split('\n').slice(-DAILY_LOG_RECENT_LINES).join('\n') : '';
     return [
       '## What you remember about this user',
@@ -362,13 +373,13 @@ export class SqliteStore {
 
   // --- chat history ---
 
-  getHistory(userId: string): ChatMessage[] {
-    const rows = this.db
-      .prepare(
-        `SELECT role, content, tool_calls AS toolCalls, tool_call_id AS toolCallId, name
-           FROM chat_messages WHERE user_id = ? ORDER BY id ASC`,
-      )
-      .all(userId) as Array<{ role: string; content: string; toolCalls: string | null; toolCallId: string | null; name: string | null }>;
+  async getHistory(userId: string): Promise<ChatMessage[]> {
+    const res = await this.pool.query(
+      `SELECT role, content, tool_calls AS "toolCalls", tool_call_id AS "toolCallId", name
+         FROM chat_messages WHERE user_id = $1 ORDER BY id ASC`,
+      [userId],
+    );
+    const rows = res.rows as Array<{ role: string; content: string; toolCalls: string | null; toolCallId: string | null; name: string | null }>;
     return rows.map((r) => {
       if (r.role === 'tool') {
         return { role: 'tool', toolCallId: r.toolCallId ?? '', name: r.name ?? '', content: r.content };
@@ -381,37 +392,44 @@ export class SqliteStore {
     });
   }
 
-  appendHistory(userId: string, ...messages: ChatMessage[]): void {
-    const insert = this.db.prepare(
-      'INSERT INTO chat_messages (user_id, role, content, tool_calls, tool_call_id, name, created_at) VALUES (?,?,?,?,?,?,?)',
-    );
+  async appendHistory(userId: string, ...messages: ChatMessage[]): Promise<void> {
+    const client = await this.pool.connect();
     const now = nowIso();
-    const tx = this.db.transaction((msgs: ChatMessage[]) => {
-      for (const m of msgs) {
+    try {
+      await client.query('BEGIN');
+      for (const m of messages) {
         const toolCalls = m.role === 'assistant' && m.toolCalls ? JSON.stringify(m.toolCalls) : null;
         const toolCallId = m.role === 'tool' ? m.toolCallId : null;
         const name = m.role === 'tool' ? m.name : null;
-        insert.run(userId, m.role, 'content' in m ? m.content : '', toolCalls, toolCallId, name, now);
+        await client.query(
+          'INSERT INTO chat_messages (user_id, role, content, tool_calls, tool_call_id, name, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+          [userId, m.role, 'content' in m ? m.content : '', toolCalls, toolCallId, name, now],
+        );
       }
       // Trim to the most recent HISTORY_LIMIT rows for this user.
-      this.db
-        .prepare(
-          `DELETE FROM chat_messages WHERE user_id = ? AND id NOT IN (
-             SELECT id FROM chat_messages WHERE user_id = ? ORDER BY id DESC LIMIT ?
-           )`,
-        )
-        .run(userId, userId, HISTORY_LIMIT);
-    });
-    tx(messages);
+      await client.query(
+        `DELETE FROM chat_messages WHERE user_id = $1 AND id NOT IN (
+           SELECT id FROM chat_messages WHERE user_id = $2 ORDER BY id DESC LIMIT $3
+         )`,
+        [userId, userId, HISTORY_LIMIT],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
-  clearHistory(userId: string): void {
-    this.db.prepare('DELETE FROM chat_messages WHERE user_id = ?').run(userId);
+  async clearHistory(userId: string): Promise<void> {
+    await this.pool.query('DELETE FROM chat_messages WHERE user_id = $1', [userId]);
   }
 
-  getBriefing(userId: string): Briefing {
+  async getBriefing(userId: string): Promise<Briefing> {
     const now = new Date();
-    const items = this.getCalendarEventsForUser(userId)
+    const events = await this.getCalendarEventsForUser(userId);
+    const items = events
       .filter((event) => new Date(event.startIso).toDateString() === now.toDateString())
       .slice(0, 3)
       .map((event) => ({
@@ -423,10 +441,13 @@ export class SqliteStore {
         color: event.color,
       }));
 
-    const user = this.db.prepare('SELECT name FROM users WHERE id = ?').get(userId) as { name: string } | undefined;
+    const userRes = await this.pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+    const user = userRes.rows[0] as { name: string } | undefined;
     const firstName = user?.name?.split(' ')[0] ?? 'there';
-    const connectedAppsCount = this.getApps(userId).filter((a) => a.connected).length;
-    const activeFlowsCount = this.getFlows(userId).filter((f) => f.active).length;
+    const apps = await this.getApps(userId);
+    const connectedAppsCount = apps.filter((a) => a.connected).length;
+    const flows = await this.getFlows(userId);
+    const activeFlowsCount = flows.filter((f) => f.active).length;
 
     return {
       greeting: `Morning, ${firstName}!`,

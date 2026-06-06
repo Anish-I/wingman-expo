@@ -45,7 +45,7 @@ export const calendarReadToday: ServerTool = {
   },
   async execute(args, ctx: ToolContext): Promise<ToolResult> {
     const offset = typeof args.offset === 'number' ? args.offset : 0;
-    const connected = ctx.store.getApps(ctx.userId).some((a) => a.slug === 'googlecalendar' && a.connected);
+    const connected = (await ctx.store.getApps(ctx.userId)).some((a) => a.slug === 'googlecalendar' && a.connected);
     if (!connected) {
       return {
         output: 'Calendar is not connected. Generate an OAuth link with create_app_connection({ app: "googlecalendar" }).',
@@ -54,7 +54,7 @@ export const calendarReadToday: ServerTool = {
     }
     const target = new Date();
     target.setDate(target.getDate() + offset);
-    const events = ctx.store.getCalendarEventsForUser(ctx.userId).filter((event) => {
+    const events = (await ctx.store.getCalendarEventsForUser(ctx.userId)).filter((event) => {
       return new Date(event.startIso).toDateString() === target.toDateString();
     });
     await ctx.store.addActivity(ctx.userId, {
@@ -86,7 +86,7 @@ export const calendarCreateEvent: ServerTool = {
   },
   async execute(args, ctx: ToolContext): Promise<ToolResult> {
     const intent = String(args.intent ?? '');
-    const connected = ctx.store.getApps(ctx.userId).some((a) => a.slug === 'googlecalendar' && a.connected);
+    const connected = (await ctx.store.getApps(ctx.userId)).some((a) => a.slug === 'googlecalendar' && a.connected);
     if (!connected) {
       return {
         output: 'Calendar is not connected. Generate an OAuth link with create_app_connection({ app: "googlecalendar" }).',
@@ -127,7 +127,7 @@ export const briefingToday: ServerTool = {
     parameters: { type: 'object', properties: {} },
   },
   async execute(_args, ctx: ToolContext): Promise<ToolResult> {
-    const b = ctx.store.getBriefing(ctx.userId);
+    const b = await ctx.store.getBriefing(ctx.userId);
     const chips = b.chips.join(' · ');
     const items = b.items.map((i) => `${i.time} ${i.title}`).join('; ');
     return {
@@ -181,7 +181,7 @@ export const remember: ServerTool = {
     if (!note) {
       return { output: 'Nothing to remember — provide a note.' };
     }
-    ctx.store.appendDailyLog(ctx.userId, note);
+    await ctx.store.appendDailyLog(ctx.userId, note);
     await ctx.store.addActivity(ctx.userId, {
       title: 'Remembered something',
       subtitle: note.length > 60 ? `${note.slice(0, 57)}…` : note,

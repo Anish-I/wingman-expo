@@ -1,9 +1,9 @@
-import type { SqliteStore } from '../store.js';
+import type { PgStore } from '../store.js';
 import type { ToolDefinition } from '../llm/types.js';
 
 export type ToolContext = {
   userId: string;
-  store: SqliteStore;
+  store: PgStore;
 };
 
 export type ToolMeta =

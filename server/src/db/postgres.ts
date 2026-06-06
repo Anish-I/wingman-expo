@@ -1,10 +1,21 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import pg from 'pg';
 
-import Database from 'better-sqlite3';
+export type PgPool = pg.Pool;
 
-export type DB = Database.Database;
-
+/**
+ * Postgres schema for Wingman (Supabase-compatible).
+ *
+ * Ported from db/sqlite.ts. Differences from the SQLite schema:
+ *  - INTEGER PRIMARY KEY AUTOINCREMENT  -> BIGINT GENERATED ALWAYS AS IDENTITY
+ *  - INTEGER 0/1 booleans (flows.active) -> BOOLEAN
+ *  - lower(email) unique index          -> functional unique index (same syntax)
+ *  - timestamps stay TEXT (ISO-8601) to match nowIso() + lexical ordering;
+ *    revisit to TIMESTAMPTZ once the store is fully on Postgres.
+ *
+ * Schema is applied idempotently on boot (CREATE TABLE IF NOT EXISTS), mirroring
+ * the SQLite "schema-on-boot" approach. For Supabase we run this once via the
+ * connection string; later we can move it to versioned SQL migrations.
+ */
 export const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
@@ -32,9 +43,9 @@ CREATE TABLE IF NOT EXISTS connect_tokens (
 );
 
 CREATE TABLE IF NOT EXISTS app_connections (
-  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  app_slug     TEXT NOT NULL,
-  connected_at TEXT NOT NULL,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  app_slug      TEXT NOT NULL,
+  connected_at  TEXT NOT NULL,
   connection_id TEXT,
   PRIMARY KEY (user_id, app_slug)
 );
@@ -48,7 +59,7 @@ CREATE TABLE IF NOT EXISTS flows (
   trigger     TEXT NOT NULL,
   runs        INTEGER NOT NULL DEFAULT 0,
   color       TEXT NOT NULL,
-  active      INTEGER NOT NULL DEFAULT 0,
+  active      BOOLEAN NOT NULL DEFAULT FALSE,
   app_slug    TEXT NOT NULL,
   created_at  TEXT NOT NULL
 );
@@ -78,7 +89,7 @@ CREATE TABLE IF NOT EXISTS calendar_events (
 CREATE INDEX IF NOT EXISTS calendar_events_user_idx ON calendar_events (user_id, start_iso);
 
 CREATE TABLE IF NOT EXISTS chat_messages (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   role         TEXT NOT NULL,
   content      TEXT NOT NULL DEFAULT '',
@@ -98,13 +109,41 @@ CREATE TABLE IF NOT EXISTS memory_docs (
 );
 `;
 
-export function openDb(filePath: string): DB {
-  if (filePath !== ':memory:') {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+let pool: PgPool | null = null;
+
+/**
+ * Open (or reuse) the Postgres pool and ensure the schema exists.
+ *
+ * Supabase: use the connection string from Project Settings → Database.
+ * For a long-running server prefer the session pooler / direct connection.
+ *
+ * TLS: we verify the server certificate by default (Supabase's pooler chains to
+ * a public CA, so system roots validate it). Do NOT disable verification — that
+ * exposes the connection to MITM. If you hit a self-signed cert in a private
+ * setup, point `DATABASE_CA_CERT` at the CA PEM so it can be verified properly.
+ * Local Postgres (localhost) runs without SSL.
+ */
+function sslConfig(connectionString: string): pg.PoolConfig['ssl'] {
+  const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+  if (isLocal) return undefined;
+  const ca = process.env.DATABASE_CA_CERT?.trim();
+  return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: true };
+}
+
+export async function openPg(connectionString: string): Promise<PgPool> {
+  if (pool) return pool;
+  pool = new pg.Pool({
+    connectionString,
+    ssl: sslConfig(connectionString),
+    max: 10,
+  });
+  await pool.query(SCHEMA_SQL);
+  return pool;
+}
+
+export async function closePg(): Promise<void> {
+  if (pool) {
+    await pool.end();
+    pool = null;
   }
-  const db = new Database(filePath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.exec(SCHEMA_SQL);
-  return db;
 }
