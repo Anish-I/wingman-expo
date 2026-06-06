@@ -12,6 +12,9 @@ import { createComposioRuntime } from './tools/composio.js';
 import { buildRegistry } from './tools/registry.js';
 import { openSSE } from './chat/sse.js';
 import { runChatTurn } from './chat/orchestrator.js';
+import { startScheduler, runDueFlows } from './flows/scheduler.js';
+import { runFlowDefinition, validateSteps } from './flows/runner.js';
+import { builtinTools } from './tools/builtin.js';
 import type { ChatEvent } from './llm/types.js';
 
 loadEnv();
@@ -63,6 +66,28 @@ const critiquePayloadSchema = z.object({
 });
 
 const appSlugSchema = z.enum(['gmail', 'googlecalendar', 'slack', 'notion', 'linear', 'github', 'spotify', 'dropbox']);
+
+const flowScheduleSchema = z.object({
+  hour: z.number().int().min(0).max(23),
+  minute: z.number().int().min(0).max(59),
+  days: z.array(z.number().int().min(0).max(6)).default([]),
+});
+
+const flowStepSchema = z.object({
+  id: z.string().min(1),
+  tool: z.string().min(1),
+  args: z.record(z.string(), z.unknown()).default({}),
+});
+
+const createFlowSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  emoji: z.string().optional(),
+  color: z.string().optional(),
+  appSlug: z.string().optional(),
+  schedule: flowScheduleSchema.nullable().optional(),
+  steps: z.array(flowStepSchema).optional(),
+}).optional();
 
 function authHeaderToken(header?: string) {
   if (!header?.startsWith('Bearer ')) {
@@ -305,8 +330,42 @@ app.post('/flows', async (request, reply) => {
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  const flow = await store.createFlow(user.id);
+  const input = createFlowSchema.parse(request.body);
+  // Validate steps against the known tool set before persisting.
+  if (input?.steps?.length) {
+    const known = new Set(Object.keys(builtinTools));
+    const error = validateSteps(input.steps, known);
+    if (error) {
+      return reply.status(400).send({ error });
+    }
+  }
+  const flow = await store.createFlow(user.id, input);
   return reply.status(201).send({ flow });
+});
+
+// Manually run a flow now (used by "Test" / dry-run and immediate execution).
+app.post('/flows/:id/run', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const params = z.object({ id: z.string() }).parse(request.params);
+  const flows = await store.getActiveScheduledFlows();
+  const flow = flows.find((f) => f.id === params.id && f.userId === user.id);
+  if (!flow || !flow.definition) {
+    return reply.status(404).send({ error: 'Flow not found or has no runnable definition.' });
+  }
+  const ctx = { userId: user.id, store };
+  const registry = await buildRegistry({ ctx, composio: composioRuntime });
+  const result = await runFlowDefinition(flow.definition, registry, ctx);
+  await store.recordFlowRun(flow.id, new Date().toISOString());
+  await store.addActivity(user.id, {
+    title: result.ok ? 'Flow ran' : 'Flow failed',
+    subtitle: result.ok ? flow.title : `${flow.title}: ${result.error ?? 'unknown error'}`,
+    pip: result.ok ? 'clap' : 'sad',
+    color: result.ok ? flow.color : '#EF4444',
+  });
+  return reply.send({ result });
 });
 
 app.patch('/flows/:id', async (request, reply) => {
@@ -340,6 +399,12 @@ app.post('/dev/ui-critique', async (request, reply) => {
     theme: payload.theme,
     viewport: payload.viewport ?? null,
   }));
+});
+
+// Start the flow scheduler (once-a-minute tick; runs due flows).
+const scheduler = startScheduler(store, composioRuntime);
+app.addHook('onClose', async () => {
+  scheduler.stop();
 });
 
 await app.listen({ host: '0.0.0.0', port: env.PORT });

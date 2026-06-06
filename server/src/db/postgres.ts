@@ -51,19 +51,24 @@ CREATE TABLE IF NOT EXISTS app_connections (
 );
 
 CREATE TABLE IF NOT EXISTS flows (
-  id          TEXT PRIMARY KEY,
-  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  emoji       TEXT NOT NULL,
-  title       TEXT NOT NULL,
-  description TEXT NOT NULL,
-  trigger     TEXT NOT NULL,
-  runs        INTEGER NOT NULL DEFAULT 0,
-  color       TEXT NOT NULL,
-  active      BOOLEAN NOT NULL DEFAULT FALSE,
-  app_slug    TEXT NOT NULL,
-  created_at  TEXT NOT NULL
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  emoji        TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  description  TEXT NOT NULL,
+  trigger      TEXT NOT NULL,
+  runs         INTEGER NOT NULL DEFAULT 0,
+  color        TEXT NOT NULL,
+  active       BOOLEAN NOT NULL DEFAULT FALSE,
+  app_slug     TEXT NOT NULL,
+  -- Flows v1: executable definition (schedule + steps) stored as JSON.
+  -- Nullable so legacy/display-only rows keep working; runner skips null defs.
+  definition   JSONB,
+  last_run_at  TEXT,
+  created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS flows_user_idx ON flows (user_id);
+CREATE INDEX IF NOT EXISTS flows_active_idx ON flows (active);
 
 CREATE TABLE IF NOT EXISTS activities (
   id         TEXT PRIMARY KEY,

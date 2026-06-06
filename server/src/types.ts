@@ -33,6 +33,23 @@ export type Flow = {
   appSlug: string;
 };
 
+/** Input for creating a real (executable) flow. */
+export type CreateFlowInput = {
+  title: string;
+  description?: string;
+  emoji?: string;
+  color?: string;
+  appSlug?: string;
+  schedule?: import('./flows/types.js').FlowSchedule | null;
+  steps?: import('./flows/types.js').FlowStep[];
+};
+
+/** A flow row including its executable definition (server-side use). */
+export type FlowWithDefinition = Flow & {
+  definition: import('./flows/types.js').FlowDefinition | null;
+  lastRunAt: string | null;
+};
+
 export type AppConnection = {
   id: string;
   slug: string;

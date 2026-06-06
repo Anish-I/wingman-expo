@@ -5,10 +5,14 @@ import type {
   AppConnection,
   Briefing,
   CalendarEvent,
+  CreateFlowInput,
   CurrentUser,
   Flow,
+  FlowWithDefinition,
 } from './types.js';
 import { openPg, closePg, type PgPool } from './db/postgres.js';
+import type { FlowDefinition } from './flows/types.js';
+import { describeSchedule } from './flows/schedule.js';
 import type { ChatMessage, ToolCall } from './llm/types.js';
 
 const HISTORY_LIMIT = 30;
@@ -261,23 +265,32 @@ export class PgStore {
     return (res.rows as Array<Omit<Flow, 'active'> & { active: boolean }>).map((f) => ({ ...f, active: Boolean(f.active) }));
   }
 
-  async createFlow(userId: string): Promise<Flow> {
+  /**
+   * Create a real flow. `definition` (schedule + steps) drives execution; the
+   * display `trigger` string is derived from the schedule so the UI and the
+   * runtime never drift. Falls back to a sensible default when fields are omitted
+   * (keeps the existing "New flow" button working until the builder sends a body).
+   */
+  async createFlow(userId: string, input?: CreateFlowInput): Promise<Flow> {
+    const schedule = input?.schedule ?? null;
+    const definition: FlowDefinition = { schedule, steps: input?.steps ?? [] };
     const flow: Flow = {
       id: randomId('flow'),
-      emoji: '📅',
-      title: 'Daily calendar summary',
-      description: 'A daily digest of your upcoming events',
-      trigger: 'Weekdays 8:00 AM',
+      emoji: input?.emoji ?? '📅',
+      title: input?.title ?? 'Daily calendar summary',
+      description: input?.description ?? 'A daily digest of your upcoming events',
+      trigger: describeSchedule(schedule),
       runs: 0,
-      color: '#3B82F6',
+      color: input?.color ?? '#3B82F6',
       active: true,
-      appSlug: 'googlecalendar',
+      appSlug: input?.appSlug ?? 'googlecalendar',
     };
     await this.pool.query(
-      'INSERT INTO flows (id, user_id, emoji, title, description, trigger, runs, color, active, app_slug, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
-      [flow.id, userId, flow.emoji, flow.title, flow.description, flow.trigger, flow.runs, flow.color, true, flow.appSlug, nowIso()],
+      `INSERT INTO flows (id, user_id, emoji, title, description, trigger, runs, color, active, app_slug, definition, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [flow.id, userId, flow.emoji, flow.title, flow.description, flow.trigger, flow.runs, flow.color, true, flow.appSlug, JSON.stringify(definition), nowIso()],
     );
-    await this.addActivity(userId, { title: 'Created flow', subtitle: flow.title, pip: 'clap', color: '#3B82F6' });
+    await this.addActivity(userId, { title: 'Created flow', subtitle: flow.title, pip: 'clap', color: flow.color });
     return flow;
   }
 
@@ -288,6 +301,27 @@ export class PgStore {
     );
     const row = res.rows[0] as (Omit<Flow, 'active'> & { active: boolean }) | undefined;
     return row ? { ...row, active: Boolean(row.active) } : null;
+  }
+
+  /** Active flows that have a schedule — the scheduler's candidate set. */
+  async getActiveScheduledFlows(): Promise<Array<FlowWithDefinition & { userId: string }>> {
+    const res = await this.pool.query(
+      `SELECT id, user_id AS "userId", emoji, title, description, trigger, runs, color, active,
+              app_slug AS "appSlug", definition, last_run_at AS "lastRunAt"
+         FROM flows
+        WHERE active = TRUE AND definition IS NOT NULL`,
+    );
+    return (res.rows as Array<FlowWithDefinition & { userId: string; active: boolean }>).map((f) => ({
+      ...f,
+      active: Boolean(f.active),
+      // pg returns JSONB already parsed; normalize null/undefined.
+      definition: (f.definition as FlowDefinition | null) ?? null,
+    }));
+  }
+
+  /** Record a successful run: bump the counter and stamp last_run_at. */
+  async recordFlowRun(flowId: string, at: string): Promise<void> {
+    await this.pool.query('UPDATE flows SET runs = runs + 1, last_run_at = $2 WHERE id = $1', [flowId, at]);
   }
 
   // --- activities ---
