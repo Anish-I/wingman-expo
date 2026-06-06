@@ -103,14 +103,19 @@ export class PgStore {
   }
 
   private async seedDemoAccount() {
-    const existing = await this.pool.query('SELECT id FROM users WHERE lower(email) = lower($1)', [DEMO_EMAIL]);
-    if (existing.rows[0]) return;
-
     const id = 'user-sam';
-    await this.pool.query(
-      'INSERT INTO users (id, name, email, password_hash, phone, tier, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    // Atomic insert-or-skip: ON CONFLICT makes this race-safe when several
+    // store instances boot at once (test processes, or multiple app instances).
+    // RETURNING tells us whether *this* call created the row; only then do we
+    // seed the child rows, so we never double-seed flows/events on restart.
+    const inserted = await this.pool.query(
+      `INSERT INTO users (id, name, email, password_hash, phone, tier, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (id) DO NOTHING
+       RETURNING id`,
       [id, 'Sam Ortega', DEMO_EMAIL, hashPassword(DEMO_PASSWORD), '+1 (555) 123-4567', 'Pro', nowIso()],
     );
+    if (!inserted.rows[0]) return; // already seeded by another boot
 
     for (const slug of ['gmail', 'slack', 'github']) {
       await this.markConnected(id, slug);

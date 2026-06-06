@@ -135,6 +135,9 @@ function sslConfig(connectionString: string): pg.PoolConfig['ssl'] {
   return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: true };
 }
 
+// Fixed key for the schema-setup advisory lock (arbitrary, stable across boots).
+const SCHEMA_LOCK_KEY = 0x77_69_6e_67; // "wing"
+
 export async function openPg(connectionString: string): Promise<PgPool> {
   if (pool) return pool;
   pool = new pg.Pool({
@@ -142,7 +145,18 @@ export async function openPg(connectionString: string): Promise<PgPool> {
     ssl: sslConfig(connectionString),
     max: 10,
   });
-  await pool.query(SCHEMA_SQL);
+  // Serialize schema application with a session advisory lock. Postgres'
+  // CREATE TABLE/INDEX IF NOT EXISTS is not safe under concurrent DDL (it can
+  // race on the pg_type/pg_class catalogs), which bites when multiple instances
+  // or test processes boot at once. The lock makes setup single-flight.
+  const client = await pool.connect();
+  try {
+    await client.query('SELECT pg_advisory_lock($1)', [SCHEMA_LOCK_KEY]);
+    await client.query(SCHEMA_SQL);
+  } finally {
+    await client.query('SELECT pg_advisory_unlock($1)', [SCHEMA_LOCK_KEY]).catch(() => {});
+    client.release();
+  }
   return pool;
 }
 

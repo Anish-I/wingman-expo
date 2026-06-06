@@ -7,7 +7,9 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test \"src/**/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "db:up": "docker run -d --name wingman-pg -e POSTGRES_PASSWORD=wingman -e POSTGRES_USER=wingman -e POSTGRES_DB=wingman -p 5433:5432 postgres:17-alpine",
+    "db:down": "docker rm -f wingman-pg"
   },
   "dependencies": {
     "@composio/core": "^0.10.0",
