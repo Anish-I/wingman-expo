@@ -45,6 +45,57 @@ test('data is isolated per user', { skip }, async () => {
   assert.deepEqual(bApps, []);
 });
 
+test('createFlow + getFlowById round-trips the executable definition', { skip }, async () => {
+  const store = await freshStore();
+  const created = await store.createAccount({ name: 'Flow', email: `flow-${rid()}@example.com`, password: 'secret123' });
+  assert.ok(created.ok);
+  const userId = created.account.id;
+  const flow = await store.createFlow(userId, {
+    title: 'Morning brief',
+    schedule: { hour: 8, minute: 0, days: [1, 2, 3, 4, 5] },
+    steps: [{ id: 'step-1', tool: 'briefing_today', args: {} }],
+  });
+  assert.equal(flow.trigger, 'Weekdays 8:00 AM'); // derived, not hand-typed
+
+  const fetched = await store.getFlowById(flow.id, userId);
+  assert.ok(fetched);
+  assert.equal(fetched?.definition?.steps.length, 1);
+  assert.equal(fetched?.definition?.steps[0]?.tool, 'briefing_today');
+  assert.deepEqual(fetched?.definition?.schedule?.days, [1, 2, 3, 4, 5]);
+
+  // Owner scoping: another user can't read it.
+  const other = await store.createAccount({ name: 'Other', email: `other-${rid()}@example.com`, password: 'secret123' });
+  assert.ok(other.ok);
+  assert.equal(await store.getFlowById(flow.id, other.account.id), null);
+});
+
+test('updateFlow re-derives the trigger and merges partial fields', { skip }, async () => {
+  const store = await freshStore();
+  const created = await store.createAccount({ name: 'Upd', email: `upd-${rid()}@example.com`, password: 'secret123' });
+  assert.ok(created.ok);
+  const userId = created.account.id;
+  const flow = await store.createFlow(userId, { title: 'Draft', schedule: null, steps: [] });
+  assert.equal(flow.trigger, 'Manual trigger');
+
+  // Update only the schedule + steps; title is untouched.
+  const updated = await store.updateFlow(flow.id, userId, {
+    schedule: { hour: 21, minute: 30, days: [] },
+    steps: [{ id: 'step-1', tool: 'briefing_today', args: {} }],
+  });
+  assert.ok(updated);
+  assert.equal(updated?.title, 'Draft');
+  assert.equal(updated?.trigger, 'Daily 9:30 PM');
+
+  const fetched = await store.getFlowById(flow.id, userId);
+  assert.equal(fetched?.definition?.steps.length, 1);
+  assert.equal(fetched?.definition?.schedule?.hour, 21);
+
+  // Updating a flow that isn't yours is a no-op (null).
+  const other = await store.createAccount({ name: 'NotOwner', email: `no-${rid()}@example.com`, password: 'secret123' });
+  assert.ok(other.ok);
+  assert.equal(await store.updateFlow(flow.id, other.account.id, { title: 'Hijack' }), null);
+});
+
 test('connect token round-trips and marks app connected', { skip }, async () => {
   const store = await freshStore();
   const created = await store.createAccount({ name: 'Conn', email: `conn-${rid()}@example.com`, password: 'secret123' });

@@ -44,6 +44,9 @@ export type CreateFlowInput = {
   steps?: import('./flows/types.js').FlowStep[];
 };
 
+/** Input for updating an existing flow. All fields optional (partial update). */
+export type UpdateFlowInput = Partial<CreateFlowInput>;
+
 /** A flow row including its executable definition (server-side use). */
 export type FlowWithDefinition = Flow & {
   definition: import('./flows/types.js').FlowDefinition | null;

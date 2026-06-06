@@ -9,6 +9,7 @@ import type {
   CurrentUser,
   Flow,
   FlowWithDefinition,
+  UpdateFlowInput,
 } from './types.js';
 import { openPg, closePg, type PgPool } from './db/postgres.js';
 import type { FlowDefinition } from './flows/types.js';
@@ -327,6 +328,62 @@ export class PgStore {
   /** Record a successful run: bump the counter and stamp last_run_at. */
   async recordFlowRun(flowId: string, at: string): Promise<void> {
     await this.pool.query('UPDATE flows SET runs = runs + 1, last_run_at = $2 WHERE id = $1', [flowId, at]);
+  }
+
+  /** One flow (with its executable definition), scoped to its owner. */
+  async getFlowById(flowId: string, userId: string): Promise<FlowWithDefinition | null> {
+    const res = await this.pool.query(
+      `SELECT id, emoji, title, description, trigger, runs, color, active,
+              app_slug AS "appSlug", definition, last_run_at AS "lastRunAt"
+         FROM flows
+        WHERE id = $1 AND user_id = $2`,
+      [flowId, userId],
+    );
+    const row = res.rows[0] as (FlowWithDefinition & { active: boolean }) | undefined;
+    if (!row) return null;
+    return {
+      ...row,
+      active: Boolean(row.active),
+      definition: (row.definition as FlowDefinition | null) ?? null,
+    };
+  }
+
+  /**
+   * Update a flow's display fields and executable definition. Only provided
+   * fields change; the `trigger` string is re-derived from the schedule so the
+   * UI label and the runtime never drift. Scoped to the owner; returns null when
+   * the flow doesn't exist for this user.
+   */
+  async updateFlow(flowId: string, userId: string, input: UpdateFlowInput): Promise<Flow | null> {
+    const current = await this.getFlowById(flowId, userId);
+    if (!current) return null;
+
+    const scheduleProvided = 'schedule' in input;
+    const stepsProvided = 'steps' in input;
+    const nextSchedule = scheduleProvided ? input.schedule ?? null : current.definition?.schedule ?? null;
+    const nextSteps = stepsProvided ? input.steps ?? [] : current.definition?.steps ?? [];
+    const definition: FlowDefinition = { schedule: nextSchedule, steps: nextSteps };
+
+    const next: Flow = {
+      id: current.id,
+      emoji: input.emoji ?? current.emoji,
+      title: input.title ?? current.title,
+      description: input.description ?? current.description,
+      trigger: describeSchedule(nextSchedule),
+      runs: current.runs,
+      color: input.color ?? current.color,
+      active: current.active,
+      appSlug: input.appSlug ?? current.appSlug,
+    };
+
+    await this.pool.query(
+      `UPDATE flows
+          SET emoji = $1, title = $2, description = $3, trigger = $4,
+              color = $5, app_slug = $6, definition = $7
+        WHERE id = $8 AND user_id = $9`,
+      [next.emoji, next.title, next.description, next.trigger, next.color, next.appSlug, JSON.stringify(definition), flowId, userId],
+    );
+    return next;
   }
 
   // --- activities ---

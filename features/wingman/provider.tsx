@@ -11,12 +11,15 @@ import {
   fetchActivity,
   fetchApps,
   fetchBriefing,
+  fetchFlow,
   fetchFlows,
   fetchMe,
   patchFlow,
+  runFlow as runFlowRequest,
   runUiCritique,
   sendChat,
   sendChatStream,
+  updateFlow as updateFlowRequest,
 } from '@/features/wingman/api';
 import {
   type AppIntegration,
@@ -25,11 +28,15 @@ import {
   type Briefing,
   type CurrentUser,
   type DemoAuthCredentials,
+  type FlowDetail,
   type FlowItem,
+  type FlowRunResult,
+  type FlowUpdateInput,
   type UiCritiqueReport,
   type ActivityEvent,
   type ChatMessage,
   appLibrary,
+  describeSchedule,
   initialEvents,
   initialFlows,
   initialMessages,
@@ -77,6 +84,9 @@ type WingmanContextValue = {
   refreshData: () => Promise<void>;
   setThemeMode: (mode: ThemeMode) => void;
   createFlow: () => Promise<FlowItem | null>;
+  getFlowDetail: (id: string) => Promise<FlowDetail | null>;
+  updateFlow: (id: string, input: FlowUpdateInput) => Promise<FlowItem | null>;
+  runFlow: (id: string) => Promise<FlowRunResult | null>;
   toggleFlow: (id: string, nextValue: boolean) => Promise<void>;
   setPushEnabled: (value: boolean) => void;
   setMemoryEnabled: (value: boolean) => void;
@@ -434,6 +444,84 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clearSession, session?.token]);
 
+  const getFlowDetail = React.useCallback(async (id: string): Promise<FlowDetail | null> => {
+    const localFlow = flows.find((flow) => flow.id === id);
+    const localDetail: FlowDetail | null = localFlow ? { ...localFlow, definition: null } : null;
+    if (!session?.token || isLocalDemoToken(session.token)) {
+      return localDetail;
+    }
+    try {
+      const response = await fetchFlow(session.token, id);
+      return response.flow;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Unauthorized') {
+        clearSession();
+        return null;
+      }
+      return localDetail;
+    }
+  }, [clearSession, flows, session?.token]);
+
+  const updateFlow = React.useCallback(async (id: string, input: FlowUpdateInput): Promise<FlowItem | null> => {
+    if (!session?.token) {
+      return null;
+    }
+    const applyLocal = (): FlowItem | null => {
+      let updated: FlowItem | null = null;
+      setFlows((currentFlows) => currentFlows.map((flow) => {
+        if (flow.id !== id) return flow;
+        updated = {
+          ...flow,
+          title: input.title ?? flow.title,
+          description: input.description ?? flow.description,
+          emoji: input.emoji ?? flow.emoji,
+          color: input.color ?? flow.color,
+          trigger: 'schedule' in input ? describeSchedule(input.schedule ?? null) : flow.trigger,
+        };
+        return updated;
+      }));
+      return updated;
+    };
+    if (isLocalDemoToken(session.token)) {
+      return applyLocal();
+    }
+    try {
+      const response = await updateFlowRequest(session.token, id, input);
+      setFlows((currentFlows) => currentFlows.map((flow) => (flow.id === id ? response.flow : flow)));
+      return response.flow;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Unauthorized') {
+        clearSession();
+        return null;
+      }
+      throw error;
+    }
+  }, [clearSession, session?.token]);
+
+  const runFlow = React.useCallback(async (id: string): Promise<FlowRunResult | null> => {
+    if (!session?.token) {
+      return null;
+    }
+    if (isLocalDemoToken(session.token)) {
+      return {
+        ok: true,
+        outputs: ['Ran in offline demo mode — start the Wingman server to execute real steps.'],
+      };
+    }
+    try {
+      const response = await runFlowRequest(session.token, id);
+      // A run bumps the counter and logs activity server-side — pull the fresh state.
+      await refreshData();
+      return response.result;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Unauthorized') {
+        clearSession();
+        return null;
+      }
+      throw error;
+    }
+  }, [clearSession, refreshData, session?.token]);
+
   const streamChatMessage = React.useCallback(async (message: string): Promise<AuthResult> => {
     if (!session?.token) {
       return { ok: false, error: 'Sign in to chat with Pip.' };
@@ -570,6 +658,9 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     refreshData,
     setThemeMode,
     createFlow,
+    getFlowDetail,
+    updateFlow,
+    runFlow,
     toggleFlow,
     setPushEnabled: (value) => setSettings((currentSettings) => ({ ...currentSettings, pushEnabled: value })),
     setMemoryEnabled: (value) => setSettings((currentSettings) => ({ ...currentSettings, memoryEnabled: value })),

@@ -8,7 +8,10 @@ import type {
   AuthSession,
   Briefing,
   DemoAuthCredentials,
+  FlowDetail,
   FlowItem,
+  FlowRunResult,
+  FlowUpdateInput,
   UiCritiqueReport,
 } from '@/features/wingman/data';
 
@@ -44,15 +47,19 @@ async function requestJson<T>(path: string, options: RequestOptions = {}): Promi
     controller.abort(timeoutError);
   }, REQUEST_TIMEOUT_MS);
 
+  // Only advertise a JSON body when we actually send one. Fastify rejects an
+  // empty body when Content-Type is application/json (FST_ERR_CTP_EMPTY_JSON_BODY),
+  // which would otherwise break body-less POSTs like /flows/:id/run and /chat/clear.
+  const hasBody = options.body !== undefined && options.body !== null;
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       method: options.method ?? 'GET',
       headers: {
-        'Content-Type': 'application/json',
+        ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
         ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
       },
-      body: options.body ? JSON.stringify(options.body) : undefined,
+      body: hasBody ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
     });
   } catch (error) {
@@ -136,6 +143,25 @@ export async function createFlow(token: string) {
     method: 'POST',
     token,
     body: {},
+  });
+}
+
+export async function fetchFlow(token: string, flowId: string) {
+  return requestJson<{ flow: FlowDetail }>(`/flows/${flowId}`, { token });
+}
+
+export async function updateFlow(token: string, flowId: string, input: FlowUpdateInput) {
+  return requestJson<{ flow: FlowItem }>(`/flows/${flowId}`, {
+    method: 'PUT',
+    token,
+    body: input,
+  });
+}
+
+export async function runFlow(token: string, flowId: string) {
+  return requestJson<{ result: FlowRunResult }>(`/flows/${flowId}/run`, {
+    method: 'POST',
+    token,
   });
 }
 

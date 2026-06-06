@@ -12,7 +12,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { appLibrary, type AppIntegration, type FlowItem } from '@/features/wingman/data';
+import {
+  appLibrary,
+  describeSchedule,
+  type AppIntegration,
+  type FlowItem,
+  type FlowSchedule,
+  type FlowStep,
+} from '@/features/wingman/data';
 import { useWingman } from '@/features/wingman/provider';
 import {
   IconGlyph,
@@ -80,6 +87,92 @@ const promptChips = [
   'Only run on weekdays',
   'Test with sample data',
 ] as const;
+
+// --- Real flow definition controls -----------------------------------------
+// The canvas above is a visual representation; these controls are the source of
+// truth for what actually gets saved + executed. They map directly onto the
+// server's { schedule, steps[] } model.
+
+type SchedulePresetKey = 'manual' | 'daily' | 'weekdays' | 'weekends';
+
+const schedulePresets: { key: SchedulePresetKey; label: string; days: number[] | null }[] = [
+  { key: 'manual', label: 'Manual', days: null },
+  { key: 'daily', label: 'Daily', days: [] },
+  { key: 'weekdays', label: 'Weekdays', days: [1, 2, 3, 4, 5] },
+  { key: 'weekends', label: 'Weekends', days: [0, 6] },
+];
+
+type ActionPreset = {
+  key: string;
+  label: string;
+  emoji: string;
+  tool: string;
+  args: Record<string, unknown>;
+};
+
+const actionPresets: ActionPreset[] = [
+  { key: 'briefing', label: 'Morning briefing', emoji: '🌅', tool: 'briefing_today', args: {} },
+  { key: 'calendar-today', label: "Today's calendar", emoji: '📆', tool: 'calendar_read_today', args: { offset: 0 } },
+  { key: 'calendar-tomorrow', label: "Tomorrow's calendar", emoji: '🌙', tool: 'calendar_read_today', args: { offset: 1 } },
+];
+
+const SCHEDULE_STEP_MINUTES = 30;
+
+function sameDaySet(a: number[], b: number[]) {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((value) => set.has(value));
+}
+
+function presetKeyFromSchedule(schedule: FlowSchedule | null): SchedulePresetKey {
+  if (!schedule) return 'manual';
+  const days = [...schedule.days].sort((a, b) => a - b);
+  if (days.length === 0) return 'daily';
+  if (sameDaySet(days, [1, 2, 3, 4, 5])) return 'weekdays';
+  if (sameDaySet(days, [0, 6])) return 'weekends';
+  return 'daily';
+}
+
+function scheduleFor(key: SchedulePresetKey, hour: number, minute: number): FlowSchedule | null {
+  const preset = schedulePresets.find((entry) => entry.key === key);
+  if (!preset || preset.days === null) return null;
+  return { hour, minute, days: preset.days };
+}
+
+function stepsFromActionKeys(keys: string[]): FlowStep[] {
+  return keys
+    .map((key) => actionPresets.find((preset) => preset.key === key))
+    .filter((preset): preset is ActionPreset => Boolean(preset))
+    .map((preset, index) => ({ id: `step-${index + 1}-${preset.key}`, tool: preset.tool, args: preset.args }));
+}
+
+function actionKeysFromSteps(steps: FlowStep[] | undefined): string[] {
+  if (!steps?.length) return [];
+  return steps
+    .map((step) => {
+      const stepOffset = typeof step.args?.offset === 'number' ? step.args.offset : null;
+      const match = actionPresets.find((preset) => {
+        const presetOffset = typeof preset.args.offset === 'number' ? preset.args.offset : null;
+        return preset.tool === step.tool && presetOffset === stepOffset;
+      });
+      return match?.key;
+    })
+    .filter((key): key is string => Boolean(key));
+}
+
+function clockLabel(hour: number, minute: number) {
+  const suffix = hour < 12 ? 'AM' : 'PM';
+  const h12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${h12}:${String(minute).padStart(2, '0')} ${suffix}`;
+}
+
+function stepClock(hour: number, minute: number, deltaMinutes: number) {
+  const total = (hour * 60 + minute + deltaMinutes + 24 * 60) % (24 * 60);
+  return { hour: Math.floor(total / 60), minute: total % 60 };
+}
+
+type StatusTone = 'info' | 'ok' | 'error';
+type BuilderStatus = { tone: StatusTone; text: string };
 
 const createNodeOptions = [
   { kind: 'timer', label: 'Timer', emoji: '⏱️' },
@@ -1133,11 +1226,280 @@ function PipChatDock({
   );
 }
 
+function FlowConfigBar({
+  hour,
+  minute,
+  presetKey,
+  running,
+  selectedActionKeys,
+  onSelectPreset,
+  onShiftTime,
+  onTest,
+  onToggleAction,
+}: {
+  hour: number;
+  minute: number;
+  presetKey: SchedulePresetKey;
+  running: boolean;
+  selectedActionKeys: string[];
+  onSelectPreset: (key: SchedulePresetKey) => void;
+  onShiftTime: (deltaMinutes: number) => void;
+  onTest: () => void;
+  onToggleAction: (key: string) => void;
+}) {
+  const { colors } = useWingman();
+  const canTest = selectedActionKeys.length > 0 && !running;
+
+  return (
+    <View
+      style={{
+        borderRadius: 18,
+        borderWidth: 1.5,
+        borderColor: colors.border,
+        backgroundColor: colors.card,
+        paddingHorizontal: 10,
+        paddingVertical: 9,
+        gap: 9,
+        borderCurve: 'continuous',
+      }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Text
+          style={{
+            width: 38,
+            color: colors.fgMuted,
+            fontFamily: wingmanFonts.text,
+            fontSize: 9,
+            fontWeight: '900',
+            letterSpacing: 0.6,
+            textTransform: 'uppercase',
+          }}>
+          When
+        </Text>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          {schedulePresets.map((preset) => {
+            const active = preset.key === presetKey;
+            return (
+              <Pressable
+                key={preset.key}
+                accessibilityRole="button"
+                accessibilityLabel={`Run ${preset.label}`}
+                onPress={() => onSelectPreset(preset.key)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 7,
+                  borderRadius: 999,
+                  borderWidth: 1.5,
+                  borderColor: active ? colors.sky500 : colors.border,
+                  backgroundColor: active ? colors.sky500 : colors.cardAlt,
+                  alignItems: 'center',
+                  borderCurve: 'continuous',
+                }}>
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: active ? '#FFFFFF' : colors.fgSecondary,
+                    fontFamily: wingmanFonts.text,
+                    fontSize: 10,
+                    fontWeight: '900',
+                  }}>
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      {presetKey !== 'manual' ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Text
+            style={{
+              width: 38,
+              color: colors.fgMuted,
+              fontFamily: wingmanFonts.text,
+              fontSize: 9,
+              fontWeight: '900',
+              letterSpacing: 0.6,
+              textTransform: 'uppercase',
+            }}>
+            Time
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Earlier"
+              onPress={() => onShiftTime(-SCHEDULE_STEP_MINUTES)}
+              style={({ pressed }) => ({
+                width: 30,
+                height: 30,
+                borderRadius: 15,
+                borderWidth: 1.5,
+                borderColor: colors.border,
+                backgroundColor: colors.cardAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.7 : 1,
+              })}>
+              <IconGlyph name="chevron-left" color={colors.ink} size={15} />
+            </Pressable>
+            <Text
+              style={{
+                minWidth: 78,
+                textAlign: 'center',
+                color: colors.ink,
+                fontFamily: wingmanFonts.display,
+                fontSize: 15,
+                fontWeight: '700',
+              }}>
+              {clockLabel(hour, minute)}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Later"
+              onPress={() => onShiftTime(SCHEDULE_STEP_MINUTES)}
+              style={({ pressed }) => ({
+                width: 30,
+                height: 30,
+                borderRadius: 15,
+                borderWidth: 1.5,
+                borderColor: colors.border,
+                backgroundColor: colors.cardAlt,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.7 : 1,
+              })}>
+              <IconGlyph name="chevron-left" color={colors.ink} size={15} style={{ transform: [{ rotate: '180deg' }] }} />
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+        <Text
+          style={{
+            width: 38,
+            marginTop: 7,
+            color: colors.fgMuted,
+            fontFamily: wingmanFonts.text,
+            fontSize: 9,
+            fontWeight: '900',
+            letterSpacing: 0.6,
+            textTransform: 'uppercase',
+          }}>
+          Does
+        </Text>
+        <View style={{ flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
+          {actionPresets.map((preset) => {
+            const active = selectedActionKeys.includes(preset.key);
+            return (
+              <Pressable
+                key={preset.key}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={preset.label}
+                onPress={() => onToggleAction(preset.key)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 5,
+                  paddingVertical: 7,
+                  paddingHorizontal: 9,
+                  borderRadius: 999,
+                  borderWidth: 1.5,
+                  borderColor: active ? colors.mint500 : colors.border,
+                  backgroundColor: active ? withAlpha(colors.mint500, 0.16) : colors.cardAlt,
+                  borderCurve: 'continuous',
+                }}>
+                <Text style={{ fontSize: 12 }}>{preset.emoji}</Text>
+                <Text
+                  style={{
+                    color: active ? colors.mint500 : colors.fgSecondary,
+                    fontFamily: wingmanFonts.text,
+                    fontSize: 10,
+                    fontWeight: '900',
+                  }}>
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Test run this flow now"
+        disabled={!canTest}
+        onPress={onTest}
+        style={({ pressed }) => ({
+          minHeight: 38,
+          borderRadius: 12,
+          borderWidth: 1.5,
+          borderColor: canTest ? colors.lav500 : colors.border,
+          backgroundColor: canTest ? withAlpha(colors.lav500, 0.14) : colors.cardAlt,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
+          opacity: pressed ? 0.76 : 1,
+          borderCurve: 'continuous',
+        })}>
+        <IconGlyph name="flows" color={canTest ? colors.lav500 : colors.fgMuted} size={15} />
+        <Text
+          style={{
+            color: canTest ? colors.lav500 : colors.fgMuted,
+            fontFamily: wingmanFonts.text,
+            fontSize: 12,
+            fontWeight: '900',
+          }}>
+          {running ? 'Running…' : 'Test run now'}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function StatusStrip({ status }: { status: BuilderStatus }) {
+  const { colors } = useWingman();
+  const tone = status.tone === 'ok' ? colors.mint500 : status.tone === 'error' ? colors.coral500 : colors.sky500;
+
+  return (
+    <View
+      style={{
+        marginHorizontal: wingmanLayout.screenPadding,
+        marginBottom: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        borderRadius: 14,
+        borderWidth: 1.5,
+        borderColor: withAlpha(tone, 0.45),
+        backgroundColor: withAlpha(tone, 0.1),
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        borderCurve: 'continuous',
+      }}>
+      <View style={{ width: 7, height: 7, borderRadius: 999, backgroundColor: tone }} />
+      <Text
+        style={{
+          flex: 1,
+          color: colors.ink,
+          fontFamily: wingmanFonts.text,
+          fontSize: 11,
+          fontWeight: '700',
+          lineHeight: 15,
+        }}>
+        {status.text}
+      </Text>
+    </View>
+  );
+}
+
 export function FlowBuilderScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { flowId } = useLocalSearchParams<{ flowId?: string }>();
-  const { apps, colors, flows } = useWingman();
+  const { apps, colors, flows, getFlowDetail, runFlow, updateFlow } = useWingman();
   const [selectedNodeId, setSelectedNodeId] = React.useState<BuilderNodeId>('trigger');
   const [selectedEdgeId, setSelectedEdgeId] = React.useState<WorkflowEdgeId | null>(null);
   const [canvasSize, setCanvasSize] = React.useState({ width: 360, height: defaultCanvasHeight });
@@ -1150,6 +1512,14 @@ export function FlowBuilderScreen() {
   const [, setMessages] = React.useState<BuilderMessage[]>([]);
   const [draftPrompt, setDraftPrompt] = React.useState('');
   const [saved, setSaved] = React.useState(false);
+  // Real flow definition state — the source of truth for what gets persisted/run.
+  const [schedulePresetKey, setSchedulePresetKey] = React.useState<SchedulePresetKey>('manual');
+  const [scheduleHour, setScheduleHour] = React.useState(8);
+  const [scheduleMinute, setScheduleMinute] = React.useState(0);
+  const [selectedActionKeys, setSelectedActionKeys] = React.useState<string[]>([]);
+  const [saving, setSaving] = React.useState(false);
+  const [running, setRunning] = React.useState(false);
+  const [status, setStatus] = React.useState<BuilderStatus | null>(null);
 
   const flow = React.useMemo(() => {
     return flows.find((item) => item.id === flowId) ?? flows[0] ?? fallbackFlow;
@@ -1161,6 +1531,12 @@ export function FlowBuilderScreen() {
   const canDeleteSelectedNode = selectedEdgeId == null
     && nodes.length > 1
     && nodes.some((node) => node.id === selectedNodeId);
+
+  const schedule = React.useMemo(
+    () => scheduleFor(schedulePresetKey, scheduleHour, scheduleMinute),
+    [schedulePresetKey, scheduleHour, scheduleMinute],
+  );
+  const steps = React.useMemo(() => stepsFromActionKeys(selectedActionKeys), [selectedActionKeys]);
 
   const availableConnections = React.useMemo(() => {
     const sourceApps = apps.length > 0 ? apps : appLibrary;
@@ -1208,6 +1584,34 @@ export function FlowBuilderScreen() {
     setDraftPrompt('');
     setSaved(false);
   }, [canvasSize.height, canvasSize.width, defaultEnabledConnectionIds, flow.id, flow.title, initialNodes]);
+
+  // Hydrate the real schedule + steps from the saved definition when a flow opens.
+  // Held in a ref so re-hydration only happens on flow change, not on every
+  // `flows` update (a save/run refresh would otherwise clobber in-progress edits).
+  const getFlowDetailRef = React.useRef(getFlowDetail);
+  React.useEffect(() => {
+    getFlowDetailRef.current = getFlowDetail;
+  }, [getFlowDetail]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const detail = await getFlowDetailRef.current(flow.id);
+      if (cancelled) return;
+      const loadedSchedule = detail?.definition?.schedule ?? null;
+      setSchedulePresetKey(presetKeyFromSchedule(loadedSchedule));
+      if (loadedSchedule) {
+        setScheduleHour(loadedSchedule.hour);
+        setScheduleMinute(loadedSchedule.minute);
+      }
+      setSelectedActionKeys(actionKeysFromSteps(detail?.definition?.steps));
+      setStatus(null);
+      setSaved(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [flow.id]);
 
   const handleCanvasSizeChange = React.useCallback((size: { width: number; height: number }) => {
     setCanvasSize((currentSize) => {
@@ -1347,18 +1751,94 @@ export function FlowBuilderScreen() {
     ]);
   }, [flow, selectedNode]);
 
-  const markSaved = React.useCallback(async () => {
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setSaved(true);
+  const selectSchedulePreset = React.useCallback((key: SchedulePresetKey) => {
+    void Haptics.selectionAsync();
+    setSchedulePresetKey(key);
+    setSaved(false);
+    setStatus(null);
   }, []);
+
+  const shiftTime = React.useCallback((deltaMinutes: number) => {
+    void Haptics.selectionAsync();
+    setSaved(false);
+    setStatus(null);
+    const { hour, minute } = stepClock(scheduleHour, scheduleMinute, deltaMinutes);
+    setScheduleHour(hour);
+    setScheduleMinute(minute);
+  }, [scheduleHour, scheduleMinute]);
+
+  const toggleAction = React.useCallback((key: string) => {
+    void Haptics.selectionAsync();
+    setSaved(false);
+    setStatus(null);
+    setSelectedActionKeys((currentKeys) => (
+      currentKeys.includes(key) ? currentKeys.filter((k) => k !== key) : [...currentKeys, key]
+    ));
+  }, []);
+
+  const handleSave = React.useCallback(async () => {
+    if (saving) return;
+    setSaving(true);
+    setStatus(null);
+    try {
+      const result = await updateFlow(flow.id, { schedule, steps });
+      if (!result) {
+        setStatus({ tone: 'error', text: 'Could not save — please sign in again.' });
+        return;
+      }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setSaved(true);
+      const stepLabel = steps.length ? ` · ${steps.length} action${steps.length === 1 ? '' : 's'}` : '';
+      setStatus({ tone: 'ok', text: `Saved · ${describeSchedule(schedule)}${stepLabel}` });
+    } catch (error) {
+      setStatus({ tone: 'error', text: error instanceof Error ? error.message : 'Save failed.' });
+    } finally {
+      setSaving(false);
+    }
+  }, [flow.id, saving, schedule, steps, updateFlow]);
+
+  const handleTest = React.useCallback(async () => {
+    if (running) return;
+    if (steps.length === 0) {
+      setStatus({ tone: 'info', text: 'Pick at least one action for Pip to run.' });
+      return;
+    }
+    setRunning(true);
+    setStatus({ tone: 'info', text: 'Running this flow now…' });
+    try {
+      // Persist first so the server runs exactly what's on screen.
+      const persisted = await updateFlow(flow.id, { schedule, steps });
+      if (persisted) setSaved(true);
+      const result = await runFlow(flow.id);
+      if (!result) {
+        setStatus({ tone: 'error', text: 'Could not run — please sign in again.' });
+        return;
+      }
+      await Haptics.notificationAsync(
+        result.ok ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Error,
+      );
+      if (result.ok) {
+        setStatus({
+          tone: 'ok',
+          text: result.outputs.length ? result.outputs.join(' · ') : 'Flow ran — nothing to report.',
+        });
+      } else {
+        setStatus({ tone: 'error', text: result.error ? `Flow failed: ${result.error}` : 'Flow failed.' });
+      }
+    } catch (error) {
+      setStatus({ tone: 'error', text: error instanceof Error ? error.message : 'Run failed.' });
+    } finally {
+      setRunning(false);
+    }
+  }, [flow.id, running, schedule, steps, runFlow, updateFlow]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <BuilderHeader
         flow={flow}
-        saved={saved}
+        saved={saved && !saving}
         onBack={() => router.back()}
-        onSave={() => void markSaved()}
+        onSave={() => void handleSave()}
       />
 
       <View
@@ -1386,6 +1866,18 @@ export function FlowBuilderScreen() {
 
         <NodeToolbar
           createNode={createNode}
+        />
+
+        <FlowConfigBar
+          hour={scheduleHour}
+          minute={scheduleMinute}
+          presetKey={schedulePresetKey}
+          running={running}
+          selectedActionKeys={selectedActionKeys}
+          onSelectPreset={selectSchedulePreset}
+          onShiftTime={shiftTime}
+          onTest={() => void handleTest()}
+          onToggleAction={toggleAction}
         />
 
         <View style={{ flex: 1, minHeight: 0 }}>
@@ -1416,6 +1908,8 @@ export function FlowBuilderScreen() {
           onDeleteSelectedEdge={deleteSelectedEdge}
         />
       </View>
+
+      {status ? <StatusStrip status={status} /> : null}
 
       <PipChatDock
         bottomInset={insets.bottom}

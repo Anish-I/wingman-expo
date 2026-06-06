@@ -115,6 +115,73 @@ export type FlowItem = {
   active: boolean;
 };
 
+/** A weekly schedule. `days` empty = every day; days use 0=Sun … 6=Sat. */
+export type FlowSchedule = {
+  hour: number;
+  minute: number;
+  days: number[];
+};
+
+/** One executable step: call `tool` with `args`. Mirrors the server model. */
+export type FlowStep = {
+  id: string;
+  tool: string;
+  args: Record<string, unknown>;
+};
+
+export type FlowDefinition = {
+  schedule: FlowSchedule | null;
+  steps: FlowStep[];
+};
+
+/** A flow plus its executable definition (returned by GET /flows/:id). */
+export type FlowDetail = FlowItem & {
+  definition: FlowDefinition | null;
+};
+
+export type FlowUpdateInput = {
+  title?: string;
+  description?: string;
+  emoji?: string;
+  color?: string;
+  appSlug?: string;
+  schedule?: FlowSchedule | null;
+  steps?: FlowStep[];
+};
+
+export type FlowRunResult = {
+  ok: boolean;
+  outputs: string[];
+  error?: string;
+  failedStepId?: string;
+};
+
+const FLOW_WEEKDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const FLOW_WEEKDAYS = [1, 2, 3, 4, 5];
+const FLOW_WEEKEND = [0, 6];
+
+function sameDaySet(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every((x) => set.has(x));
+}
+
+/**
+ * Render a schedule as the display `trigger` string — mirrors the server's
+ * describeSchedule so the label the builder shows matches what gets persisted.
+ */
+export function describeSchedule(schedule: FlowSchedule | null): string {
+  if (!schedule) return 'Manual trigger';
+  const suffix = schedule.hour < 12 ? 'AM' : 'PM';
+  const h12 = schedule.hour % 12 === 0 ? 12 : schedule.hour % 12;
+  const clock = `${h12}:${String(schedule.minute).padStart(2, '0')} ${suffix}`;
+  const days = [...schedule.days].sort((a, b) => a - b);
+  if (days.length === 0) return `Daily ${clock}`;
+  if (sameDaySet(days, FLOW_WEEKDAYS)) return `Weekdays ${clock}`;
+  if (sameDaySet(days, FLOW_WEEKEND)) return `Weekends ${clock}`;
+  return `${days.map((d) => FLOW_WEEKDAY_ABBR[d]).join(', ')} ${clock}`;
+}
+
 export type ActivityEvent = {
   id: string;
   when: string;

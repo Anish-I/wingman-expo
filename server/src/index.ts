@@ -89,6 +89,17 @@ const createFlowSchema = z.object({
   steps: z.array(flowStepSchema).optional(),
 }).optional();
 
+// Partial update — every field optional (title is not required to PATCH a flow).
+const updateFlowSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().optional(),
+  emoji: z.string().optional(),
+  color: z.string().optional(),
+  appSlug: z.string().optional(),
+  schedule: flowScheduleSchema.nullable().optional(),
+  steps: z.array(flowStepSchema).optional(),
+});
+
 function authHeaderToken(header?: string) {
   if (!header?.startsWith('Bearer ')) {
     return null;
@@ -325,6 +336,21 @@ app.get('/flows', async (request, reply) => {
   return reply.send({ items: await store.getFlows(user.id) });
 });
 
+// One flow with its executable definition — lets the builder hydrate the real
+// schedule + steps when opened for editing.
+app.get('/flows/:id', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const params = z.object({ id: z.string() }).parse(request.params);
+  const flow = await store.getFlowById(params.id, user.id);
+  if (!flow) {
+    return reply.status(404).send({ error: 'Flow not found.' });
+  }
+  return reply.send({ flow });
+});
+
 app.post('/flows', async (request, reply) => {
   const user = await getAuthedUser(request);
   if (!user) {
@@ -343,6 +369,28 @@ app.post('/flows', async (request, reply) => {
   return reply.status(201).send({ flow });
 });
 
+// Update a flow's display fields + executable definition (the builder's Save).
+app.put('/flows/:id', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const params = z.object({ id: z.string() }).parse(request.params);
+  const input = updateFlowSchema.parse(request.body);
+  if (input.steps?.length) {
+    const known = new Set(Object.keys(builtinTools));
+    const error = validateSteps(input.steps, known);
+    if (error) {
+      return reply.status(400).send({ error });
+    }
+  }
+  const flow = await store.updateFlow(params.id, user.id, input);
+  if (!flow) {
+    return reply.status(404).send({ error: 'Flow not found.' });
+  }
+  return reply.send({ flow });
+});
+
 // Manually run a flow now (used by "Test" / dry-run and immediate execution).
 app.post('/flows/:id/run', async (request, reply) => {
   const user = await getAuthedUser(request);
@@ -350,10 +398,9 @@ app.post('/flows/:id/run', async (request, reply) => {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   const params = z.object({ id: z.string() }).parse(request.params);
-  const flows = await store.getActiveScheduledFlows();
-  const flow = flows.find((f) => f.id === params.id && f.userId === user.id);
-  if (!flow || !flow.definition) {
-    return reply.status(404).send({ error: 'Flow not found or has no runnable definition.' });
+  const flow = await store.getFlowById(params.id, user.id);
+  if (!flow || !flow.definition || flow.definition.steps.length === 0) {
+    return reply.status(404).send({ error: 'Flow not found or has no runnable steps.' });
   }
   const ctx = { userId: user.id, store };
   const registry = await buildRegistry({ ctx, composio: composioRuntime });
