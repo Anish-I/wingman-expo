@@ -1,10 +1,11 @@
+import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
-import type { ActivityEvent } from '@/features/wingman/data';
+import type { ActivityEvent, FlowItem } from '@/features/wingman/data';
 import { useWingman } from '@/features/wingman/provider';
 import { IconGlyph, PipCircle, WingmanLabel } from '@/features/wingman/primitives';
 import {
@@ -28,6 +29,32 @@ function sectionFor(event: ActivityEvent) {
   return event.when.toLowerCase().includes('yesterday') ? 'Earlier' : 'Today';
 }
 
+/**
+ * Where tapping an activity (row or action button) should take you. Flow events
+ * jump straight into that flow's builder (matched by title, since activities
+ * store the flow title as their subtitle); everything else routes to the screen
+ * where you'd act on it.
+ */
+function destinationFor(event: ActivityEvent, flows: FlowItem[]): string {
+  const haystack = `${event.title} ${event.subtitle}`.toLowerCase();
+
+  if (haystack.includes('flow')) {
+    const match = flows.find((flow) => flow.title.trim().toLowerCase() === event.subtitle.trim().toLowerCase());
+    return match ? `/flow-builder?flowId=${encodeURIComponent(match.id)}` : '/(tabs)/flows';
+  }
+  if (haystack.includes('connected') || haystack.includes('connect')) return '/apps';
+  if (
+    haystack.includes('calendar') || haystack.includes('meeting') || haystack.includes('event')
+    || haystack.includes('lunch') || haystack.includes('scheduled')
+  ) {
+    return '/(tabs)';
+  }
+  if (haystack.includes('email') || haystack.includes('digest') || haystack.includes('reminder') || haystack.includes('remember')) {
+    return '/(tabs)/chat';
+  }
+  return '/(tabs)';
+}
+
 function ActivityRow({
   event,
   index,
@@ -37,9 +64,15 @@ function ActivityRow({
   index: number;
   isLast: boolean;
 }) {
-  const { colors } = useWingman();
+  const { colors, flows } = useWingman();
+  const router = useRouter();
   const unread = sectionFor(event) === 'Today';
   const actionLabel = actionLabelFor(event);
+
+  const goToDestination = React.useCallback(() => {
+    Haptics.selectionAsync().catch(() => undefined);
+    router.push(destinationFor(event, flows) as never);
+  }, [event, flows, router]);
 
   return (
     <Animated.View
@@ -56,9 +89,7 @@ function ActivityRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${event.title}. ${event.subtitle}. ${event.when}`}
-        onPress={() => {
-          Haptics.selectionAsync().catch(() => undefined);
-        }}
+        onPress={goToDestination}
         style={({ pressed }) => ({
           flex: 1,
           minWidth: 0,
@@ -124,9 +155,7 @@ function ActivityRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${actionLabel} ${event.title}`}
-        onPress={() => {
-          Haptics.selectionAsync().catch(() => undefined);
-        }}
+        onPress={goToDestination}
           style={({ pressed }) => ({
             minWidth: 56,
             height: 30,
