@@ -14,6 +14,8 @@ export type ComposioRuntime = {
   listTools(userId: string, toolkits?: string[]): Promise<{ definition: ToolDefinition; slug: string; toolkit: string }[]>;
   execute(userId: string, call: ToolCall): Promise<string>;
   initiateConnection(userId: string, toolkit: string, callbackUrl: string): Promise<{ url: string | null; connectionId: string | null }>;
+  /** Toolkit slugs the user has an ACTIVE connected account for (Composio = source of truth). */
+  connectedToolkits(userId: string): Promise<Set<string>>;
 };
 
 export function createComposioRuntime(env: { COMPOSIO_API_KEY?: string; COMPOSIO_AUTH_CONFIGS?: string }): ComposioRuntime {
@@ -26,6 +28,7 @@ export function createComposioRuntime(env: { COMPOSIO_API_KEY?: string; COMPOSIO
       async listTools() { return []; },
       async execute() { throw new Error('Composio is not configured. Set COMPOSIO_API_KEY in server/.env.'); },
       async initiateConnection() { return { url: null, connectionId: null }; },
+      async connectedToolkits() { return new Set<string>(); },
     };
   }
 
@@ -76,6 +79,20 @@ export function createComposioRuntime(env: { COMPOSIO_API_KEY?: string; COMPOSIO
       } catch (err) {
         console.warn(`[composio] link ${toolkit} failed:`, (err as Error).message);
         return { url: null, connectionId: null };
+      }
+    },
+    async connectedToolkits(userId) {
+      try {
+        const res = await composio.connectedAccounts.list({ user_ids: [String(userId)], statuses: ['ACTIVE'] } as any);
+        const set = new Set<string>();
+        for (const acc of ((res as any).items ?? [])) {
+          const slug = acc?.toolkit?.slug;
+          if (slug) set.add(String(slug).toLowerCase());
+        }
+        return set;
+      } catch (err) {
+        console.warn('[composio] connectedToolkits failed:', (err as Error).message);
+        return new Set<string>();
       }
     },
   };

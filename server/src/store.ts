@@ -118,9 +118,9 @@ export class PgStore {
     );
     if (!inserted.rows[0]) return; // already seeded by another boot
 
-    for (const slug of ['gmail', 'slack', 'github']) {
-      await this.markConnected(id, slug);
-    }
+    // NOTE: we intentionally do NOT pre-mark any apps connected. "Connected"
+    // must mean a real OAuth connection (Composio is the source of truth);
+    // faking it here made the Apps screen lie. Users connect apps via OAuth.
 
     const seedFlows: Array<Omit<Flow, 'id'>> = [
       { emoji: '📆', title: 'Calendar brief', description: "Tomorrow's meetings every night", trigger: 'Nightly 9:30 PM', runs: 12, color: '#F5BC1E', active: true, appSlug: 'googlecalendar' },
@@ -244,6 +244,10 @@ export class PgStore {
     if (!row) return null;
     await this.pool.query('DELETE FROM connect_tokens WHERE token = $1', [token]);
     return { token: row.token, userId: row.user_id, appSlug: row.app_slug };
+  }
+
+  async disconnectApp(userId: string, appSlug: string) {
+    await this.pool.query('DELETE FROM app_connections WHERE user_id = $1 AND app_slug = $2', [userId, appSlug]);
   }
 
   async connectApp(userId: string, appSlug: string, connectionId?: string) {

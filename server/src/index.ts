@@ -143,6 +143,29 @@ function serializeAuth(account: { id: string; name: string; email: string; phone
 // origin:true reflects the caller's origin. The default method set is only
 // GET,HEAD,POST — so list every verb we use, or PUT/PATCH/DELETE get blocked by
 // the browser preflight (Save = PUT, flow toggle = PATCH, delete account = DELETE).
+/**
+ * Apps with their TRUE connection status. Composio is the source of truth for
+ * OAuth connections, so when it's enabled we reconcile our DB flag against the
+ * user's ACTIVE connected accounts (and persist the correction, so the rest of
+ * the app — registry, tools, briefing — agrees). When Composio is off we fall
+ * back to the stored flag.
+ */
+async function appsForUser(userId: string) {
+  const apps = await store.getApps(userId);
+  if (!composioRuntime.enabled) return apps;
+  const live = await composioRuntime.connectedToolkits(userId);
+  for (const app of apps) {
+    const nowConnected = live.has(app.slug.toLowerCase());
+    if (app.connected !== nowConnected) {
+      if (nowConnected) await store.connectApp(userId, app.slug);
+      else await store.disconnectApp(userId, app.slug);
+      app.connected = nowConnected;
+      if (!nowConnected) app.connectedAt = undefined;
+    }
+  }
+  return apps;
+}
+
 await app.register(cors, {
   origin: true,
   methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -189,7 +212,7 @@ app.get('/apps', async (request, reply) => {
   }
   return reply.send({
     totalAvailable: 1003,
-    items: await store.getApps(user.id),
+    items: await appsForUser(user.id),
   });
 });
 
@@ -198,7 +221,7 @@ app.get('/apps/status', async (request, reply) => {
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  const apps = await store.getApps(user.id);
+  const apps = await appsForUser(user.id);
   const connected = apps.filter((item) => item.connected).map((item) => item.slug);
   const missing = apps.filter((item) => !item.connected).map((item) => item.slug);
   return reply.send({ connected, missing });
