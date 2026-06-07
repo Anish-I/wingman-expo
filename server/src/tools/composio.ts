@@ -65,10 +65,16 @@ export function createComposioRuntime(env: { COMPOSIO_API_KEY?: string; COMPOSIO
         return { url: null, connectionId: null };
       }
       try {
-        const request = await composio.connectedAccounts.initiate(String(userId), authConfigId, { callbackUrl });
-        return { url: (request as any).redirectUrl ?? (request as any).url ?? null, connectionId: (request as any).id ?? null };
+        // `link` is the supported path for Composio-managed OAuth auth configs
+        // (the older `initiate` endpoint was retired for managed auth). It returns
+        // a ConnectionRequest whose redirectUrl is the provider's consent screen.
+        const request = await composio.connectedAccounts.link(String(userId), authConfigId, { callbackUrl });
+        return {
+          url: (request as any).redirectUrl ?? (request as any).url ?? null,
+          connectionId: (request as any).id ?? (request as any).connectedAccountId ?? null,
+        };
       } catch (err) {
-        console.warn(`[composio] initiate ${toolkit} failed:`, (err as Error).message);
+        console.warn(`[composio] link ${toolkit} failed:`, (err as Error).message);
         return { url: null, connectionId: null };
       }
     },

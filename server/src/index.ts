@@ -22,6 +22,9 @@ loadEnv();
 const env = z.object({
   PORT: z.coerce.number().default(3002),
   FRONTEND_URL: z.string().default('http://localhost:8082'),
+  // Where THIS server is reachable from the browser (for OAuth callbacks).
+  // Defaults to localhost:PORT; set to the deployed URL in production.
+  PUBLIC_API_URL: z.string().optional(),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL (Supabase Postgres connection string) is required.'),
   DEFAULT_LLM_PROVIDER: z.string().default('demo'),
   LLM_PROVIDER: z.string().optional(),
@@ -30,6 +33,9 @@ const env = z.object({
   COMPOSIO_API_KEY: z.string().optional(),
   COMPOSIO_AUTH_CONFIGS: z.string().optional(),
 }).parse(process.env);
+
+// Public base URL of this API (used to build OAuth callback URLs the browser hits).
+const apiBaseUrl = env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`;
 
 const app = Fastify({ logger: true });
 const store = await PgStore.open(env.DATABASE_URL);
@@ -204,16 +210,33 @@ app.post('/connect/create-connect-token', async (request, reply) => {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   const payload = z.object({ app: appSlugSchema }).parse(request.body);
+  // Our connect token round-trips the (userId, appSlug) through the OAuth dance:
+  // we hand it to Composio as the callback URL, and consume it when the user
+  // returns to mark the app connected.
   const connectToken = await store.createConnectToken(user.id, payload.app);
+  const callbackUrl = `${apiBaseUrl}/connect/callback?connectToken=${encodeURIComponent(connectToken)}`;
+
+  // Real OAuth via Composio when a managed auth config exists for this toolkit.
+  if (composioRuntime.enabled) {
+    const { url } = await composioRuntime.initiateConnection(user.id, payload.app, callbackUrl);
+    if (url) {
+      return reply.send({ connectToken, initiateUrl: url });
+    }
+    // Composio is on but this toolkit has no auth config yet.
+    return reply.status(400).send({ error: `${payload.app} isn't available to connect yet.` });
+  }
+
+  // Mock fallback (Composio not configured) — keeps the offline/demo flow working.
   return reply.send({
     connectToken,
-    initiateUrl: `${env.FRONTEND_URL.replace('8082', String(env.PORT))}/connect/initiate?connectToken=${encodeURIComponent(connectToken)}`,
+    initiateUrl: `${apiBaseUrl}/connect/initiate?connectToken=${encodeURIComponent(connectToken)}`,
   });
 });
 
+// Mock-only hop: simulate the provider redirect when Composio isn't configured.
 app.get('/connect/initiate', async (request, reply) => {
   const token = z.object({ connectToken: z.string() }).parse(request.query).connectToken;
-  return reply.redirect(`${env.FRONTEND_URL.replace('8082', String(env.PORT))}/connect/callback?connectToken=${encodeURIComponent(token)}`);
+  return reply.redirect(`${apiBaseUrl}/connect/callback?connectToken=${encodeURIComponent(token)}`);
 });
 
 app.get('/connect/callback', async (request, reply) => {
