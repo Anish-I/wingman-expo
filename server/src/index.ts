@@ -134,7 +134,14 @@ function serializeAuth(account: { id: string; name: string; email: string; phone
   };
 }
 
-await app.register(cors, { origin: true });
+// origin:true reflects the caller's origin. The default method set is only
+// GET,HEAD,POST — so list every verb we use, or PUT/PATCH/DELETE get blocked by
+// the browser preflight (Save = PUT, flow toggle = PATCH, delete account = DELETE).
+await app.register(cors, {
+  origin: true,
+  methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+});
 
 app.get('/health', async () => ({
   ok: true,
