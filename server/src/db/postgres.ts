@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import pg from 'pg';
 
 export type PgPool = pg.Pool;
@@ -122,16 +125,25 @@ let pool: PgPool | null = null;
  * Supabase: use the connection string from Project Settings → Database.
  * For a long-running server prefer the session pooler / direct connection.
  *
- * TLS: we verify the server certificate by default (Supabase's pooler chains to
- * a public CA, so system roots validate it). Do NOT disable verification — that
- * exposes the connection to MITM. If you hit a self-signed cert in a private
- * setup, point `DATABASE_CA_CERT` at the CA PEM so it can be verified properly.
- * Local Postgres (localhost) runs without SSL.
+ * TLS: we always verify the server certificate. Do NOT disable verification —
+ * that exposes the connection to MITM. Supabase's pooler presents a cert signed
+ * by Supabase's own CA (not a public root), so supply that CA to verify against:
+ *   - DATABASE_CA_CERT_FILE — path to the CA .crt (download it from the Supabase
+ *     dashboard: Project Settings → Database → SSL configuration), or
+ *   - DATABASE_CA_CERT — the CA PEM inline.
+ * With neither set we fall back to the system roots. Local Postgres runs without SSL.
  */
+function loadCaCert(): string | undefined {
+  const file = process.env.DATABASE_CA_CERT_FILE?.trim();
+  if (file) return fs.readFileSync(path.resolve(file), 'utf8');
+  const inline = process.env.DATABASE_CA_CERT?.trim();
+  return inline || undefined;
+}
+
 function sslConfig(connectionString: string): pg.PoolConfig['ssl'] {
   const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
   if (isLocal) return undefined;
-  const ca = process.env.DATABASE_CA_CERT?.trim();
+  const ca = loadCaCert();
   return ca ? { ca, rejectUnauthorized: true } : { rejectUnauthorized: true };
 }
 
