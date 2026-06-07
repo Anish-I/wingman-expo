@@ -47,7 +47,12 @@ function ActivityRow({
       style={{
         borderBottomWidth: isLast ? 0 : 1,
         borderBottomColor: colors.border,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
       }}>
+      {/* Row tap and the action button are siblings, not nested — nested
+          <Pressable> renders as nested <button> on web (invalid HTML). */}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${event.title}. ${event.subtitle}. ${event.when}`}
@@ -55,6 +60,8 @@ function ActivityRow({
           Haptics.selectionAsync().catch(() => undefined);
         }}
         style={({ pressed }) => ({
+          flex: 1,
+          minWidth: 0,
           minHeight: 72,
           paddingVertical: 11,
           flexDirection: 'row',
@@ -112,14 +119,14 @@ function ActivityRow({
             {event.when}
           </Text>
         </View>
+      </Pressable>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${actionLabel} ${event.title}`}
-          onPress={(pressEvent) => {
-            pressEvent.stopPropagation();
-            Haptics.selectionAsync().catch(() => undefined);
-          }}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${actionLabel} ${event.title}`}
+        onPress={() => {
+          Haptics.selectionAsync().catch(() => undefined);
+        }}
           style={({ pressed }) => ({
             minWidth: 56,
             height: 30,
@@ -143,7 +150,6 @@ function ActivityRow({
             }}>
             {actionLabel}
           </Text>
-        </Pressable>
       </Pressable>
     </Animated.View>
   );
