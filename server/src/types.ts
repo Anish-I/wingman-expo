@@ -35,7 +35,7 @@ export type Flow = {
 
 /** Input for creating a real (executable) flow. */
 export type CreateFlowInput = {
-  title: string;
+  title?: string;
   description?: string;
   emoji?: string;
   color?: string;

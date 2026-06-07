@@ -282,19 +282,20 @@ export class PgStore {
     const definition: FlowDefinition = { schedule, steps: input?.steps ?? [] };
     const flow: Flow = {
       id: randomId('flow'),
-      emoji: input?.emoji ?? '📅',
-      title: input?.title ?? 'Daily calendar summary',
-      description: input?.description ?? 'A daily digest of your upcoming events',
+      emoji: input?.emoji ?? '✨',
+      title: input?.title ?? 'New workflow',
+      description: input?.description ?? 'Customize the trigger, apps, and actions',
       trigger: describeSchedule(schedule),
       runs: 0,
       color: input?.color ?? '#3B82F6',
-      active: true,
+      // A fresh flow with no steps yet shouldn't be "active" (nothing to run).
+      active: (input?.steps?.length ?? 0) > 0,
       appSlug: input?.appSlug ?? 'googlecalendar',
     };
     await this.pool.query(
       `INSERT INTO flows (id, user_id, emoji, title, description, trigger, runs, color, active, app_slug, definition, created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-      [flow.id, userId, flow.emoji, flow.title, flow.description, flow.trigger, flow.runs, flow.color, true, flow.appSlug, JSON.stringify(definition), nowIso()],
+      [flow.id, userId, flow.emoji, flow.title, flow.description, flow.trigger, flow.runs, flow.color, flow.active, flow.appSlug, JSON.stringify(definition), nowIso()],
     );
     await this.addActivity(userId, { title: 'Created flow', subtitle: flow.title, pip: 'clap', color: flow.color });
     return flow;

@@ -80,7 +80,7 @@ const flowStepSchema = z.object({
 });
 
 const createFlowSchema = z.object({
-  title: z.string().min(1),
+  title: z.string().min(1).optional(),
   description: z.string().optional(),
   emoji: z.string().optional(),
   color: z.string().optional(),
