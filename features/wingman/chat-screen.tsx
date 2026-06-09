@@ -17,6 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeIn, FadeInUp } from 'react-native-reanimated';
 
+import { fetchChatHistory, type ChatHistoryItem } from '@/features/wingman/api';
 import {
   detectReaction,
   quickReplies,
@@ -64,7 +65,7 @@ function MessageBubble({
 
   return (
     <Animated.View
-      entering={(isUser ? FadeInUp : FadeInDown).springify().damping(16)}
+      entering={(isUser ? FadeInUp : FadeInDown)}
       style={{
         alignItems: isUser ? 'flex-end' : 'flex-start',
         gap: 5,
@@ -166,6 +167,7 @@ export function ChatScreen() {
   const {
     chatMessages,
     colors,
+    session,
     streamChatMessage,
     clearChatThread,
     setChatMessages,
@@ -177,6 +179,9 @@ export function ChatScreen() {
   const [floorRect, setFloorRect] = React.useState<PipAnchorRect | null>(null);
   const [nestRect, setNestRect] = React.useState<PipAnchorRect | null>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [historyItems, setHistoryItems] = React.useState<ChatHistoryItem[] | null>(null);
+  const [historyError, setHistoryError] = React.useState<string | null>(null);
   const scrollViewRef = React.useRef<ScrollView>(null);
   const handledPromptRef = React.useRef<string | null>(null);
   const rootRef = React.useRef<View>(null);
@@ -263,6 +268,23 @@ export function ChatScreen() {
     setMenuOpen(false);
   }, [chatMessages]);
 
+  const openHistory = React.useCallback(async () => {
+    await Haptics.selectionAsync();
+    setHistoryOpen(true);
+    setHistoryError(null);
+    setHistoryItems(null);
+    if (!session?.token) {
+      setHistoryError('Sign in to see saved history.');
+      return;
+    }
+    try {
+      const { items } = await fetchChatHistory(session.token);
+      setHistoryItems(items);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : 'Could not load history.');
+    }
+  }, [session?.token]);
+
   const onClearThread = React.useCallback(() => {
     Alert.alert('Clear thread?', "Pip won't remember this conversation.", [
       { text: 'Cancel', style: 'cancel' },
@@ -321,23 +343,127 @@ export function ChatScreen() {
             Online · ready to wing it
           </Text>
         </View>
-        <Pressable
-          onPress={() => setMenuOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Chat options"
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            borderWidth: 1.5,
-            borderColor: colors.border,
-            backgroundColor: colors.cardAlt,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-          <IconGlyph name="ellipsis" color={colors.fgMuted} size={20} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Pressable
+            onPress={() => void openHistory()}
+            accessibilityRole="button"
+            accessibilityLabel="Chat history"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              borderWidth: 1.5,
+              borderColor: colors.border,
+              backgroundColor: colors.cardAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+            <IconGlyph name="time" color={colors.fgMuted} size={18} />
+          </Pressable>
+          <Pressable
+            onPress={() => setMenuOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Chat options"
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              borderWidth: 1.5,
+              borderColor: colors.border,
+              backgroundColor: colors.cardAlt,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+            <IconGlyph name="ellipsis" color={colors.fgMuted} size={20} />
+          </Pressable>
+        </View>
       </View>
+      <Modal visible={historyOpen} transparent animationType="fade" onRequestClose={() => setHistoryOpen(false)}>
+        <Pressable
+          onPress={() => setHistoryOpen(false)}
+          style={{ flex: 1, backgroundColor: 'rgba(27, 34, 64, 0.45)', justifyContent: 'flex-end' }}>
+          <Pressable
+            onPress={(event) => event.stopPropagation()}
+            style={{
+              maxHeight: '70%',
+              backgroundColor: colors.card,
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              paddingHorizontal: 20,
+              paddingTop: 12,
+              paddingBottom: 24,
+              borderTopWidth: 1.5,
+              borderColor: colors.ink,
+              gap: 8,
+            }}>
+            <View
+              style={{ alignSelf: 'center', width: 44, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: 4 }}
+            />
+            <Text style={{ color: colors.ink, fontFamily: wingmanFonts.display, fontSize: 17, fontWeight: '700' }}>
+              Saved history
+            </Text>
+            <Text style={{ color: colors.fgMuted, fontFamily: wingmanFonts.text, fontSize: 12 }}>
+              Pip keeps your latest conversation turns synced to your account.
+            </Text>
+            {historyError ? (
+              <Text style={{ color: colors.coral500, fontFamily: wingmanFonts.text, fontSize: 13, paddingVertical: 12 }}>
+                {historyError}
+              </Text>
+            ) : historyItems === null ? (
+              <View style={{ paddingVertical: 16 }}>
+                <TypingDots color={colors.fgMuted} />
+              </View>
+            ) : historyItems.length === 0 ? (
+              <Text style={{ color: colors.fgMuted, fontFamily: wingmanFonts.text, fontSize: 13, paddingVertical: 12 }}>
+                Nothing saved yet — say hi to Pip!
+              </Text>
+            ) : (
+              <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 8, paddingVertical: 6 }}>
+                {historyItems.map((item) => (
+                  <View
+                    key={item.id}
+                    style={{
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: item.role === 'user' ? colors.cardAlt : colors.bgAlt,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      gap: 2,
+                    }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Text
+                        style={{
+                          color: item.role === 'user' ? colors.sky500 : colors.mint500,
+                          fontFamily: wingmanFonts.text,
+                          fontSize: 10,
+                          fontWeight: '900',
+                          letterSpacing: 0.6,
+                          textTransform: 'uppercase',
+                        }}>
+                        {item.role === 'user' ? 'You' : 'Pip'}
+                      </Text>
+                      {item.createdAt ? (
+                        <Text style={{ color: colors.fgMuted, fontFamily: wingmanFonts.text, fontSize: 10, fontWeight: '600' }}>
+                          {new Date(item.createdAt).toLocaleString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Text style={{ color: colors.ink, fontFamily: wingmanFonts.text, fontSize: 13, lineHeight: 18 }}>
+                      {item.content}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <Pressable
           onPress={() => setMenuOpen(false)}

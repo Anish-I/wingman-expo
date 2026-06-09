@@ -59,8 +59,8 @@ function FlowRow({ flow, index, onEdit, onToggle }: FlowRowProps) {
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(60 + index * 35).duration(320).springify().damping(18)}
-      layout={LinearTransition.springify().damping(20)}
+      entering={FadeInDown.delay(60 + index * 35).duration(320)}
+      layout={LinearTransition}
       style={{ width: '48.85%' }}>
       <Pressable
         onPressIn={() => {
@@ -454,7 +454,7 @@ export function FlowsScreen() {
               justifyContent: 'space-between',
               rowGap: 7,
             }}
-            layout={LinearTransition.springify().damping(20)}>
+            layout={LinearTransition}>
             {flows.map((flow, index) => (
               <FlowRow
                 key={flow.id}

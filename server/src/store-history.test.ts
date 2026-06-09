@@ -19,6 +19,28 @@ test('chat history persists and trims to the limit', { skip }, async () => {
   assert.equal(history.length, 5);
 });
 
+test('display history returns only visible user/assistant turns, in order, with ids', { skip }, async () => {
+  const store = await PgStore.open();
+  const created = await store.createAccount({ name: 'Disp', email: `disp-${rid()}@example.com`, password: 'secret123' });
+  assert.ok(created.ok);
+  const userId = created.account.id;
+  await store.appendHistory(
+    userId,
+    { role: 'user', content: 'hello pip' },
+    // Assistant tool-call shell: empty content, must be filtered out.
+    { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'remember', arguments: {} }] },
+    { role: 'tool', toolCallId: 'c1', name: 'remember', content: '{"ok":true}' },
+    { role: 'assistant', content: 'Saved it!' },
+  );
+  const display = await store.getDisplayHistory(userId);
+  assert.equal(display.length, 2);
+  assert.deepEqual(display.map((m) => [m.role, m.content]), [
+    ['user', 'hello pip'],
+    ['assistant', 'Saved it!'],
+  ]);
+  assert.ok(display.every((m) => typeof m.id === 'string' && m.id.length > 0));
+});
+
 test('clearing history removes all messages for the user', { skip }, async () => {
   const store = await PgStore.open();
   const created = await store.createAccount({ name: 'Clear', email: `clear-${rid()}@example.com`, password: 'secret123' });

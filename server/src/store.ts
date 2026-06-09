@@ -33,7 +33,32 @@ const APP_CATALOG: AppCatalogEntry[] = [
   { id: 'github', slug: 'github', name: 'GitHub', category: 'Development', emoji: '🐙', color: '#1B2240' },
   { id: 'spotify', slug: 'spotify', name: 'Spotify', category: 'Entertainment', emoji: '🎵', color: '#1DB954' },
   { id: 'dropbox', slug: 'dropbox', name: 'Dropbox', category: 'Cloud', emoji: '☁️', color: '#0061FF' },
+  { id: 'googledrive', slug: 'googledrive', name: 'Google Drive', category: 'Cloud', emoji: '📂', color: '#4285F4' },
+  { id: 'googledocs', slug: 'googledocs', name: 'Google Docs', category: 'Productivity', emoji: '📄', color: '#4285F4' },
+  { id: 'googlesheets', slug: 'googlesheets', name: 'Google Sheets', category: 'Productivity', emoji: '📊', color: '#0F9D58' },
+  { id: 'outlook', slug: 'outlook', name: 'Outlook', category: 'Communication', emoji: '📨', color: '#0078D4' },
+  { id: 'discord', slug: 'discord', name: 'Discord', category: 'Communication', emoji: '🎮', color: '#5865F2' },
+  { id: 'telegram', slug: 'telegram', name: 'Telegram', category: 'Communication', emoji: '✈️', color: '#26A5E4' },
+  { id: 'whatsapp', slug: 'whatsapp', name: 'WhatsApp', category: 'Communication', emoji: '🟢', color: '#25D366' },
+  { id: 'twitter', slug: 'twitter', name: 'X (Twitter)', category: 'Social', emoji: '🐦', color: '#1B2240' },
+  { id: 'reddit', slug: 'reddit', name: 'Reddit', category: 'Social', emoji: '👽', color: '#FF4500' },
+  { id: 'youtube', slug: 'youtube', name: 'YouTube', category: 'Entertainment', emoji: '📺', color: '#FF0000' },
+  { id: 'todoist', slug: 'todoist', name: 'Todoist', category: 'Productivity', emoji: '✅', color: '#E44332' },
+  { id: 'trello', slug: 'trello', name: 'Trello', category: 'Productivity', emoji: '📋', color: '#0079BF' },
+  { id: 'asana', slug: 'asana', name: 'Asana', category: 'Productivity', emoji: '🎯', color: '#F06A6A' },
+  { id: 'jira', slug: 'jira', name: 'Jira', category: 'Development', emoji: '🧩', color: '#0052CC' },
+  { id: 'figma', slug: 'figma', name: 'Figma', category: 'Design', emoji: '🎨', color: '#A259FF' },
+  { id: 'stripe', slug: 'stripe', name: 'Stripe', category: 'Finance', emoji: '💳', color: '#635BFF' },
+  { id: 'shopify', slug: 'shopify', name: 'Shopify', category: 'Commerce', emoji: '🛍️', color: '#96BF48' },
+  { id: 'hubspot', slug: 'hubspot', name: 'HubSpot', category: 'Sales', emoji: '🧲', color: '#FF7A59' },
+  { id: 'salesforce', slug: 'salesforce', name: 'Salesforce', category: 'Sales', emoji: '☁️', color: '#00A1E0' },
+  { id: 'zoom', slug: 'zoom', name: 'Zoom', category: 'Communication', emoji: '🎥', color: '#2D8CFF' },
+  { id: 'one_drive', slug: 'one_drive', name: 'OneDrive', category: 'Cloud', emoji: '🗄️', color: '#0078D4' },
+  { id: 'airtable', slug: 'airtable', name: 'Airtable', category: 'Productivity', emoji: '🗂️', color: '#FCB400' },
 ];
+
+/** Slugs the server accepts for connect requests (kept in sync with the catalog). */
+export const APP_CATALOG_SLUGS = APP_CATALOG.map((app) => app.slug);
 
 function nowIso() {
   return new Date().toISOString();
@@ -525,6 +550,27 @@ export class PgStore {
 
   async clearHistory(userId: string): Promise<void> {
     await this.pool.query('DELETE FROM chat_messages WHERE user_id = $1', [userId]);
+  }
+
+  /**
+   * History shaped for the client transcript: only user/assistant turns with
+   * visible text (assistant tool-call shells have empty content; tool/system
+   * rows are internal). `getHistory` can't be reused — it has no ids and
+   * includes the LLM-only rows.
+   */
+  async getDisplayHistory(userId: string): Promise<Array<{ id: string; role: 'user' | 'assistant'; content: string; createdAt: string }>> {
+    const res = await this.pool.query(
+      `SELECT id, role, content, created_at AS "createdAt" FROM chat_messages
+        WHERE user_id = $1 AND role IN ('user', 'assistant') AND content <> ''
+        ORDER BY id ASC`,
+      [userId],
+    );
+    return (res.rows as Array<{ id: number | string; role: 'user' | 'assistant'; content: string; createdAt: string }>).map((r) => ({
+      id: String(r.id),
+      role: r.role,
+      content: r.content,
+      createdAt: r.createdAt,
+    }));
   }
 
   async getBriefing(userId: string): Promise<Briefing> {

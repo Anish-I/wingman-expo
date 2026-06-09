@@ -186,7 +186,8 @@ const workflowEdges: WorkflowEdge[] = [
   { id: 'reasoning-delivery', from: 'reasoning', to: 'delivery', label: 'action' },
 ];
 
-const defaultCanvasHeight = 330;
+// Tall enough for 4 stacked nodes (78px each) with clear air between rows.
+const defaultCanvasHeight = 432;
 const nodeWidth = 204;
 const nodeHeight = 78;
 const canvasPadding = 12;
@@ -197,7 +198,7 @@ function defaultConnectionIdsFor(flow: FlowItem) {
   const ids = new Set<string>(['composio']);
 
   if (text.includes('calendar') || text.includes('meeting') || text.includes('birthday')) {
-    ids.add('calendar');
+    ids.add('googlecalendar');
   }
 
   if (text.includes('email') || text.includes('inbox') || text.includes('digest')) {
@@ -221,21 +222,23 @@ function defaultConnectionIdsFor(flow: FlowItem) {
 
 function defaultNodePositionsFor(canvasWidth: number, canvasHeight: number): NodePositions {
   const usableWidth = Math.max(canvasWidth, 330);
-  const usableHeight = Math.max(canvasHeight, 280);
+  const usableHeight = Math.max(canvasHeight, defaultCanvasHeight);
   const centerColumn = Math.max(canvasPadding, Math.round((usableWidth - nodeWidth) / 2));
   const maxY = Math.max(canvasPadding, usableHeight - nodeHeight - canvasPadding);
   const top = canvasPadding + 4;
-  const rowGap = Math.max(72, Math.min(108, Math.floor((maxY - top) / 3)));
+  // Never let rows sit closer than a full node height + breathing room —
+  // overlapping cards read as a bug on phone-width canvases.
+  const rowGap = Math.max(nodeHeight + 18, Math.min(120, Math.floor((maxY - top) / 3)));
   const offset = (value: number) => (
     Math.min(Math.max(centerColumn + value, canvasPadding), usableWidth - nodeWidth - canvasPadding)
   );
   const y = (index: number) => Math.min(top + rowGap * index, maxY);
 
   return {
-    trigger: { x: offset(-38), y: y(0) },
-    context: { x: offset(38), y: y(1) },
-    reasoning: { x: offset(-14), y: y(2) },
-    delivery: { x: offset(28), y: y(3) },
+    trigger: { x: offset(-26), y: y(0) },
+    context: { x: offset(26), y: y(1) },
+    reasoning: { x: offset(-26), y: y(2) },
+    delivery: { x: offset(26), y: y(3) },
   };
 }
 
@@ -1725,7 +1728,7 @@ export function FlowBuilderScreen() {
     const normalized = trimmed.toLowerCase();
     const connectionHints = [
       ['slack', 'slack'],
-      ['calendar', 'calendar'],
+      ['calendar', 'googlecalendar'],
       ['gmail', 'gmail'],
       ['email', 'gmail'],
       ['github', 'github'],

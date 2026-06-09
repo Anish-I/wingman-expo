@@ -74,11 +74,15 @@ export const wingmanSupportLinks = {
 
 export type AppIntegration = {
   id: string;
+  /** Composio toolkit slug (same as id on the server catalog). */
+  slug?: string;
   name: string;
   category: string;
   emoji: string;
   color: string;
   connected: boolean;
+  /** False when the server can't start OAuth for this app yet (no auth config). */
+  available?: boolean;
 };
 
 export type BriefingItem = {
@@ -277,14 +281,14 @@ export const onboardingScenes: OnboardingScene[] = [
 ];
 
 export const appLibrary: AppIntegration[] = [
-  { id: 'gmail', name: 'Gmail', category: 'Communication', emoji: '📧', color: '#EA4335', connected: true },
-  { id: 'slack', name: 'Slack', category: 'Communication', emoji: '💬', color: '#611F69', connected: true },
-  { id: 'calendar', name: 'Calendar', category: 'Productivity', emoji: '📆', color: '#F5A623', connected: true },
-  { id: 'notion', name: 'Notion', category: 'Productivity', emoji: '📝', color: '#1B2240', connected: false },
-  { id: 'linear', name: 'Linear', category: 'Development', emoji: '⚡', color: '#5E6AD2', connected: false },
-  { id: 'github', name: 'GitHub', category: 'Development', emoji: '🐙', color: '#1B2240', connected: true },
-  { id: 'spotify', name: 'Spotify', category: 'Entertainment', emoji: '🎵', color: '#1DB954', connected: false },
-  { id: 'dropbox', name: 'Dropbox', category: 'Cloud', emoji: '☁️', color: '#0061FF', connected: false },
+  { id: 'gmail', slug: 'gmail', name: 'Gmail', category: 'Communication', emoji: '📧', color: '#EA4335', connected: true, available: true },
+  { id: 'slack', slug: 'slack', name: 'Slack', category: 'Communication', emoji: '💬', color: '#611F69', connected: true, available: true },
+  { id: 'googlecalendar', slug: 'googlecalendar', name: 'Calendar', category: 'Productivity', emoji: '📆', color: '#F5A623', connected: true, available: true },
+  { id: 'notion', slug: 'notion', name: 'Notion', category: 'Productivity', emoji: '📝', color: '#1B2240', connected: false, available: true },
+  { id: 'linear', slug: 'linear', name: 'Linear', category: 'Development', emoji: '⚡', color: '#5E6AD2', connected: false, available: true },
+  { id: 'github', slug: 'github', name: 'GitHub', category: 'Development', emoji: '🐙', color: '#1B2240', connected: true, available: true },
+  { id: 'spotify', slug: 'spotify', name: 'Spotify', category: 'Entertainment', emoji: '🎵', color: '#1DB954', connected: false, available: true },
+  { id: 'dropbox', slug: 'dropbox', name: 'Dropbox', category: 'Cloud', emoji: '☁️', color: '#0061FF', connected: false, available: true },
 ];
 
 export const initialFlows: FlowItem[] = [

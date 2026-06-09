@@ -203,7 +203,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
             gap: 10,
           }}>
           <Animated.View
-            entering={FadeInDown.duration(420).springify().damping(18)}
+            entering={FadeInDown.duration(420)}
             style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 12 }}>
             <Pip variant={isCreateAccount ? 'wave' : 'happy'} size={68} />
             <View style={{ paddingBottom: 6 }}>
@@ -211,7 +211,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
             </View>
           </Animated.View>
           <Animated.View
-            entering={FadeInDown.delay(80).duration(420).springify().damping(18)}
+            entering={FadeInDown.delay(80).duration(420)}
             style={{ gap: 10 }}>
             <Text
               style={{
@@ -235,7 +235,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
         </LinearGradient>
 
         <View style={{ paddingHorizontal: wingmanLayout.screenPadding, gap: 14 }}>
-          <Animated.View entering={FadeInDown.delay(120).duration(380).springify().damping(18)}>
+          <Animated.View entering={FadeInDown.delay(120).duration(380)}>
             <SegmentedControl<AuthTab>
               value={tab}
               onChange={(nextTab) => setTab(nextTab)}
@@ -483,7 +483,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
             ) : null}
           </Animated.View>
 
-          <Animated.View entering={FadeInDown.delay(310).duration(360).springify().damping(18)}>
+          <Animated.View entering={FadeInDown.delay(310).duration(360)}>
           <Pressable onPress={() => router.push((isCreateAccount ? '/sign-in' : '/create-account') as never)}>
             <Text
               style={{
@@ -498,7 +498,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
           </Pressable>
           </Animated.View>
 
-          <Animated.View entering={FadeInDown.delay(350).duration(360).springify().damping(18)}>
+          <Animated.View entering={FadeInDown.delay(350).duration(360)}>
             <Text
               style={{
                 color: colors.fgMuted,

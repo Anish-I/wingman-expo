@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React from 'react';
 import { useColorScheme } from 'react-native';
 
@@ -11,6 +12,7 @@ import {
   fetchActivity,
   fetchApps,
   fetchBriefing,
+  fetchChatHistory,
   fetchFlow,
   fetchFlows,
   fetchMe,
@@ -162,51 +164,40 @@ function createLocalFlowActivity(flow: FlowItem): ActivityEvent {
   };
 }
 
+// AsyncStorage persists on native (and proxies localStorage on web), so the
+// session survives reloads and app restarts. The Map mirrors values for
+// synchronous reads within a running session and as a fallback if the native
+// module is unavailable (e.g. dev build predating the dependency).
 const memoryStorage = new Map<string, string>();
 
-function getStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
+async function readLocalStorage(key: string): Promise<string | null> {
   try {
-    return window.localStorage ?? null;
+    const value = await AsyncStorage.getItem(key);
+    if (value != null) {
+      memoryStorage.set(key, value);
+      return value;
+    }
   } catch {
-    return null;
-  }
-}
-
-function readLocalStorage(key: string) {
-  const storage = getStorage();
-  try {
-    if (storage) return storage.getItem(key);
-  } catch {
-    return memoryStorage.get(key) ?? null;
+    // Fall through to the in-memory mirror.
   }
   return memoryStorage.get(key) ?? null;
 }
 
 function writeLocalStorage(key: string, value: string | null) {
-  const storage = getStorage();
   if (value == null) {
-    try {
-      if (storage) storage.removeItem(key);
-    } catch {
-      // Memory storage is still cleared below.
-    }
     memoryStorage.delete(key);
+    AsyncStorage.removeItem(key).catch(() => undefined);
     return;
   }
-  try {
-    if (storage) storage.setItem(key, value);
-  } catch {
-    // Keep the in-memory fallback as the source of truth for this session.
-  }
   memoryStorage.set(key, value);
+  AsyncStorage.setItem(key, value).catch(() => undefined);
 }
 
 export function WingmanProvider({ children }: { children: React.ReactNode }) {
   const systemScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const [hydrated, setHydrated] = React.useState(typeof window === 'undefined' ? false : true);
+  // Hydration is async now (AsyncStorage) — start false everywhere so we don't
+  // flash the onboarding screen before the stored session loads.
+  const [hydrated, setHydrated] = React.useState(false);
   const [authStage, setAuthStage] = React.useState<AuthStage>('onboarding');
   const [themeMode, setThemeMode] = React.useState<ThemeMode>('light');
   const [session, setSession] = React.useState<AuthSession | null>(null);
@@ -229,25 +220,35 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
   const activeFlowsCount = flows.filter((flow) => flow.active).length;
 
   React.useEffect(() => {
-    const storedSession = readLocalStorage(SESSION_KEY);
-    const storedStage = readLocalStorage(AUTH_STAGE_KEY) as AuthStage | null;
+    let cancelled = false;
+    void (async () => {
+      const [storedSession, storedStageRaw] = await Promise.all([
+        readLocalStorage(SESSION_KEY),
+        readLocalStorage(AUTH_STAGE_KEY),
+      ]);
+      if (cancelled) return;
+      const storedStage = storedStageRaw as AuthStage | null;
 
-    if (storedSession) {
-      try {
-        const parsed = JSON.parse(storedSession) as AuthSession;
-        setSession(parsed);
-        setCurrentUser(parsed.user);
-        setAuthStage('authenticated');
-      } catch {
-        setSession(null);
-        setCurrentUser(null);
-        setAuthStage(storedStage ?? 'sign-in');
+      if (storedSession) {
+        try {
+          const parsed = JSON.parse(storedSession) as AuthSession;
+          setSession(parsed);
+          setCurrentUser(parsed.user);
+          setAuthStage('authenticated');
+        } catch {
+          setSession(null);
+          setCurrentUser(null);
+          setAuthStage(storedStage ?? 'sign-in');
+        }
+      } else {
+        setAuthStage(storedStage ?? 'onboarding');
       }
-    } else {
-      setAuthStage(storedStage ?? 'onboarding');
-    }
 
-    setHydrated(true);
+      setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const restoreDemoFallbackData = React.useCallback(() => {
@@ -312,6 +313,38 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
 
     void refreshData();
   }, [refreshData, restoreDemoFallbackData, session?.token]);
+
+  // Load the persisted transcript once per session token. Deliberately NOT part
+  // of refreshData(): that runs after every chat turn and would clobber the
+  // in-flight streaming message.
+  const historyLoadedForToken = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    const token = session?.token;
+    if (!token || isLocalDemoToken(token)) return;
+    if (historyLoadedForToken.current === token) return;
+    historyLoadedForToken.current = token;
+
+    void (async () => {
+      try {
+        const { items } = await fetchChatHistory(token);
+        if (items.length === 0) {
+          // Fresh thread: greet instead of an empty screen.
+          setChatMessages([initialMessages[0]]);
+          return;
+        }
+        setChatMessages(
+          items.map((item) => ({
+            id: `msg-${item.id}`,
+            from: item.role === 'user' ? ('user' as const) : ('pip' as const),
+            text: item.content,
+          })),
+        );
+      } catch {
+        // Non-fatal: keep whatever is on screen; allow a retry on next session change.
+        historyLoadedForToken.current = null;
+      }
+    })();
+  }, [session?.token]);
 
   const persistSession = React.useCallback((nextSession: AuthSession) => {
     setSession(nextSession);
@@ -584,7 +617,8 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
   const clearChatThread = React.useCallback(async () => {
     if (!session?.token) return;
     try { await clearChat(session.token); } catch { /* non-fatal */ }
-    setChatMessages([]);
+    // Reset to the greeting (matches what a fresh history load would show).
+    setChatMessages([initialMessages[0]]);
   }, [session?.token]);
 
   const deleteAccount = React.useCallback(async () => {

@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
 
-import { PgStore } from './store.js';
+import { PgStore, APP_CATALOG_SLUGS } from './store.js';
 import { buildUiCritique } from './ui-critique.js';
 import { pickProvider } from './llm/provider.js';
 import { createComposioRuntime } from './tools/composio.js';
@@ -30,6 +30,7 @@ const env = z.object({
   LLM_PROVIDER: z.string().optional(),
   LLM_MODEL: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  DEEPSEEK_API_KEY: z.string().optional(),
   COMPOSIO_API_KEY: z.string().optional(),
   COMPOSIO_AUTH_CONFIGS: z.string().optional(),
 }).parse(process.env);
@@ -43,6 +44,7 @@ const llmProvider = pickProvider({
   LLM_PROVIDER: env.LLM_PROVIDER,
   LLM_MODEL: env.LLM_MODEL,
   OPENAI_API_KEY: env.OPENAI_API_KEY,
+  DEEPSEEK_API_KEY: env.DEEPSEEK_API_KEY,
 });
 const composioRuntime = createComposioRuntime({
   COMPOSIO_API_KEY: env.COMPOSIO_API_KEY,
@@ -71,7 +73,10 @@ const critiquePayloadSchema = z.object({
   }).nullable().optional(),
 });
 
-const appSlugSchema = z.enum(['gmail', 'googlecalendar', 'slack', 'notion', 'linear', 'github', 'spotify', 'dropbox']);
+const appSlugSchema = z
+  .string()
+  .min(1)
+  .refine((slug) => APP_CATALOG_SLUGS.includes(slug), { message: 'Unknown app.' });
 
 const flowScheduleSchema = z.object({
   hour: z.number().int().min(0).max(23),
@@ -152,9 +157,14 @@ function serializeAuth(account: { id: string; name: string; email: string; phone
  */
 async function appsForUser(userId: string) {
   const apps = await store.getApps(userId);
-  if (!composioRuntime.enabled) return apps;
+  if (!composioRuntime.enabled) {
+    // Mock mode: everything is "available" (connect round-trips locally).
+    for (const app of apps) app.available = true;
+    return apps;
+  }
   const live = await composioRuntime.connectedToolkits(userId);
   for (const app of apps) {
+    app.available = composioRuntime.hasAuthConfig(app.slug);
     const nowConnected = live.has(app.slug.toLowerCase());
     if (app.connected !== nowConnected) {
       if (nowConnected) await store.connectApp(userId, app.slug);
@@ -211,7 +221,7 @@ app.get('/apps', async (request, reply) => {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   return reply.send({
-    totalAvailable: 1003,
+    totalAvailable: APP_CATALOG_SLUGS.length,
     items: await appsForUser(user.id),
   });
 });
@@ -344,6 +354,14 @@ app.post('/chat', async (request, reply) => {
     ? { type: 'calendar_create', appSlug: 'googlecalendar', toolName: 'calendar_create_event', createdEvent: evt }
     : { type: 'general_reply', appSlug: null, toolName: null };
   return reply.send({ assistantMessage: assembled, action, activityCreated });
+});
+
+app.get('/chat/history', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  return reply.send({ items: await store.getDisplayHistory(user.id) });
 });
 
 app.post('/chat/clear', async (request, reply) => {

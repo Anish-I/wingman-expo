@@ -85,7 +85,7 @@ export function SettingsScreen() {
       }}>
       <ScreenHeader title="Settings" />
 
-      <Animated.View entering={FadeInDown.duration(380).springify().damping(18)}>
+      <Animated.View entering={FadeInDown.duration(380)}>
       <StickerCard
         backgroundColor={isDark ? colors.cardAlt : colors.card}
         borderColor={isDark ? colors.borderStrong : colors.sky200}
@@ -140,7 +140,7 @@ export function SettingsScreen() {
       </StickerCard>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(60).duration(380).springify().damping(18)}>
+      <Animated.View entering={FadeInDown.delay(60).duration(380)}>
       <SectionGroup label="Preferences">
         <SettingsRow
           icon="notifications"
@@ -168,7 +168,7 @@ export function SettingsScreen() {
       </SectionGroup>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(120).duration(380).springify().damping(18)}>
+      <Animated.View entering={FadeInDown.delay(120).duration(380)}>
       <SectionGroup label="Appearance">
         <SettingsRow
           icon={resolvedTheme === 'dark' ? 'moon' : 'sun'}
@@ -193,7 +193,7 @@ export function SettingsScreen() {
       </SectionGroup>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(180).duration(380).springify().damping(18)}>
+      <Animated.View entering={FadeInDown.delay(180).duration(380)}>
       <SectionGroup label="Privacy">
         <SettingsRow
           icon="shield-checkmark"
@@ -225,7 +225,7 @@ export function SettingsScreen() {
       </SectionGroup>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(240).duration(380).springify().damping(18)}>
+      <Animated.View entering={FadeInDown.delay(240).duration(380)}>
       <SectionGroup label="Support">
         <SettingsRow
           icon="help-circle"
@@ -249,7 +249,7 @@ export function SettingsScreen() {
       </Animated.View>
 
       {__DEV__ ? (
-        <Animated.View entering={FadeInDown.delay(300).duration(380).springify().damping(18)}>
+        <Animated.View entering={FadeInDown.delay(300).duration(380)}>
         <SectionGroup label="Developer">
           <SettingsRow
             icon="chat"

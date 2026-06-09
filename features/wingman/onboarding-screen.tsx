@@ -10,8 +10,10 @@ import {
   View,
 } from 'react-native';
 import RNAnimated, {
+  FadeIn,
   FadeInDown,
   FadeInUp,
+  ZoomIn,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -64,31 +66,86 @@ const onboardingTitleWidths: Record<string, number> = {
   privacy: 320,
 };
 
+// Two little Pip pals per scene — they drift around the edges for extra life.
+const scenePipPals: Record<string, [number, number]> = {
+  hello: [require('@/assets/pip/pip-wave.png'), require('@/assets/pip/pip-excited.png')],
+  text: [require('@/assets/pip/pip-love.png'), require('@/assets/pip/pip-happy.png')],
+  apps: [require('@/assets/pip/pip-coding.png'), require('@/assets/pip/pip-cool.png')],
+  flows: [require('@/assets/pip/pip-checkmark.png'), require('@/assets/pip/pip-clap.png')],
+  privacy: [require('@/assets/pip/pip-ninja.png'), require('@/assets/pip/pip-thumbsup.png')],
+};
+
+/** A small Pip that floats up/down (and sways a touch) forever. */
+function FloatingPip({
+  source,
+  size,
+  duration,
+  delay = 0,
+  style,
+}: {
+  source: number;
+  size: number;
+  duration: number;
+  delay?: number;
+  style?: React.ComponentProps<typeof View>['style'];
+}) {
+  const drift = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.delay(delay),
+        Animated.timing(drift, { toValue: 1, duration, useNativeDriver: true }),
+        Animated.timing(drift, { toValue: 0, duration, useNativeDriver: true }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [delay, drift, duration]);
+
+  return (
+    <View pointerEvents="none" style={style}>
+      <RNAnimated.View entering={ZoomIn.delay(220 + delay).duration(320)}>
+        <Animated.View
+          style={{
+            transform: [
+              { translateY: drift.interpolate({ inputRange: [0, 1], outputRange: [0, -9] }) },
+              { rotate: drift.interpolate({ inputRange: [0, 1], outputRange: ['-3deg', '3deg'] }) },
+            ],
+          }}>
+          <Image source={source} contentFit="contain" style={{ width: size, height: size }} />
+        </Animated.View>
+      </RNAnimated.View>
+    </View>
+  );
+}
+
 function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] }) {
   const { colors, resolvedTheme } = useWingman();
 
   if (scene.chips) {
     return (
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-        {scene.chips.map((chip) => (
-          <StickerCard
-            key={chip}
-            style={{
-              paddingHorizontal: 14,
-              paddingVertical: 10,
-              borderColor: colors.ink,
-              alignSelf: 'flex-start',
-            }}>
-            <Text
+        {scene.chips.map((chip, index) => (
+          <RNAnimated.View key={chip} entering={ZoomIn.delay(180 + index * 90).duration(260)}>
+            <StickerCard
               style={{
-                color: colors.ink,
-                fontFamily: wingmanFonts.text,
-                fontSize: 13,
-                fontWeight: '800',
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                borderColor: colors.ink,
+                alignSelf: 'flex-start',
               }}>
-              {chip}
-            </Text>
-          </StickerCard>
+              <Text
+                style={{
+                  color: colors.ink,
+                  fontFamily: wingmanFonts.text,
+                  fontSize: 13,
+                  fontWeight: '800',
+                }}>
+                {chip}
+              </Text>
+            </StickerCard>
+          </RNAnimated.View>
         ))}
       </View>
     );
@@ -149,11 +206,10 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
   if (scene.apps) {
     return (
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-        {scene.apps.map((app) => (
+        {scene.apps.map((app, index) => (
+          <RNAnimated.View key={app.name} entering={FadeInDown.delay(160 + index * 80).duration(280)} style={{ width: '47%' }}>
           <StickerCard
-            key={app.name}
             style={{
-              width: '47%',
               minHeight: 112,
               padding: 12,
               gap: 8,
@@ -185,6 +241,7 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
               {app.name}
             </Text>
           </StickerCard>
+          </RNAnimated.View>
         ))}
       </View>
     );
@@ -193,9 +250,9 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
   if (scene.flows) {
     return (
       <View style={{ gap: 10 }}>
-        {scene.flows.map((flow) => (
+        {scene.flows.map((flow, index) => (
+          <RNAnimated.View key={flow.title} entering={FadeInDown.delay(160 + index * 90).duration(280)}>
           <StickerCard
-            key={flow.title}
             style={{
               padding: 14,
               flexDirection: 'row',
@@ -226,6 +283,7 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
             </View>
             <WingmanToggle value onValueChange={() => undefined} />
           </StickerCard>
+          </RNAnimated.View>
         ))}
       </View>
     );
@@ -339,32 +397,38 @@ function SceneBody({
 
   return (
     <RNAnimated.View style={[{ gap: 14 }, containerStyle]}>
-      <WingmanLabel color={scene.accent}>{scene.eyebrow}</WingmanLabel>
-      <Text
-        style={{
-          color: '#1B2240',
-          ...wingmanTypography.onboardingTitle,
-          maxWidth: onboardingTitleWidths[scene.id] ?? 320,
-        }}>
-        {scene.title}
-      </Text>
-      <Text
-        style={{
-          color: '#2D3555',
-          ...wingmanTypography.onboardingBody,
-          maxWidth: 330,
-        }}>
-        {scene.body}
-      </Text>
+      <RNAnimated.View entering={FadeInDown.duration(240)}>
+        <WingmanLabel color={scene.accent}>{scene.eyebrow}</WingmanLabel>
+      </RNAnimated.View>
+      <RNAnimated.View entering={FadeInDown.delay(60).duration(280)}>
+        <Text
+          style={{
+            color: '#1B2240',
+            ...wingmanTypography.onboardingTitle,
+            maxWidth: onboardingTitleWidths[scene.id] ?? 320,
+          }}>
+          {scene.title}
+        </Text>
+      </RNAnimated.View>
+      <RNAnimated.View entering={FadeInDown.delay(120).duration(280)}>
+        <Text
+          style={{
+            color: '#2D3555',
+            ...wingmanTypography.onboardingBody,
+            maxWidth: 330,
+          }}>
+          {scene.body}
+        </Text>
+      </RNAnimated.View>
       <View style={{ marginTop: 12 }}>
         <OnboardingDetail scene={scene} />
       </View>
       {scene.id === 'privacy' ? (
-        <View style={{ marginTop: 18, maxWidth: 190 }}>
+        <RNAnimated.View entering={FadeInUp.delay(320).duration(300)} style={{ marginTop: 18, maxWidth: 190 }}>
           <WingmanButton fullWidth onPress={onContinue} iconRight="arrow-right">
             Continue
           </WingmanButton>
-        </View>
+        </RNAnimated.View>
       ) : null}
     </RNAnimated.View>
   );
@@ -446,19 +510,27 @@ function OnboardingBirdRibbon({
             {
               translateY: bob.interpolate({
                 inputRange: [0, 1],
-                outputRange: [0, -6],
+                outputRange: [0, -10],
+              }),
+            },
+            {
+              rotate: bob.interpolate({
+                inputRange: [0, 1],
+                outputRange: ['-2deg', '2.5deg'],
               }),
             },
           ],
         }}>
-        <Image
-          source={heroSource}
-          contentFit="contain"
-          style={{
-            width: 138,
-            height: 138,
-          }}
-        />
+        <RNAnimated.View key={sceneId} entering={ZoomIn.duration(340)}>
+          <Image
+            source={heroSource}
+            contentFit="contain"
+            style={{
+              width: 138,
+              height: 138,
+            }}
+          />
+        </RNAnimated.View>
       </Animated.View>
     </Pressable>
   );
@@ -598,7 +670,7 @@ export function OnboardingScreen() {
           backgroundColor: currentScene.bg,
         }}>
         <RNAnimated.View
-          entering={(transitionDirection > 0 ? FadeInUp : FadeInDown).duration(200).springify().damping(22)}
+          entering={(transitionDirection > 0 ? FadeInUp : FadeInDown).duration(200)}
           style={{ gap: 14 }}>
           <SceneBody scene={currentScene} active onContinue={continueToCreateAccount} />
         </RNAnimated.View>
@@ -631,6 +703,33 @@ export function OnboardingScreen() {
           {`${String(sceneIndex + 1).padStart(2, '0')} / ${String(onboardingScenes.length).padStart(2, '0')}`}
         </Text>
       </View>
+
+      {/* Pip pals — purely decorative flock, re-keyed per scene so they pop in fresh. */}
+      <FloatingPip
+        key={`pal-a-${currentScene.id}`}
+        source={scenePipPals[currentScene.id]?.[0] ?? scenePipPals.hello[0]}
+        size={52}
+        duration={1400}
+        style={{
+          position: 'absolute',
+          top: insets.top + 96,
+          right: wingmanLayout.screenPadding + 4,
+          zIndex: 5,
+        }}
+      />
+      <FloatingPip
+        key={`pal-b-${currentScene.id}`}
+        source={scenePipPals[currentScene.id]?.[1] ?? scenePipPals.hello[1]}
+        size={44}
+        duration={1750}
+        delay={350}
+        style={{
+          position: 'absolute',
+          bottom: 64 + insets.bottom,
+          left: wingmanLayout.screenPadding + 2,
+          zIndex: 5,
+        }}
+      />
 
       <View
         style={{

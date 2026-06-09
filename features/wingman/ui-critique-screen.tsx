@@ -55,7 +55,7 @@ export function UiCritiqueScreen() {
       />
 
       <View style={{ paddingHorizontal: wingmanLayout.screenPadding, gap: 16 }}>
-        <Animated.View entering={FadeInDown.duration(380).springify().damping(18)}>
+        <Animated.View entering={FadeInDown.duration(380)}>
         <StickerCard style={{ padding: 16, gap: 12 }}>
           <WingmanLabel color={colors.sky500}>Target surface</WingmanLabel>
           <SegmentedControl
@@ -83,7 +83,7 @@ export function UiCritiqueScreen() {
         </Animated.View>
 
         {error ? (
-          <Animated.View entering={FadeInDown.duration(280).springify().damping(18)}>
+          <Animated.View entering={FadeInDown.duration(280)}>
           <StickerCard style={{ padding: 14 }}>
             <Text
               style={{
@@ -99,7 +99,7 @@ export function UiCritiqueScreen() {
         ) : null}
 
         {report ? (
-          <Animated.View entering={FadeInDown.duration(380).springify().damping(18)}>
+          <Animated.View entering={FadeInDown.duration(380)}>
           <StickerCard style={{ padding: 16, gap: 14 }}>
             <View style={{ gap: 6 }}>
               <WingmanLabel color={report.verdict === 'pass' ? colors.mint500 : colors.sun500}>Verdict</WingmanLabel>

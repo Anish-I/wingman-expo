@@ -76,7 +76,7 @@ function ActivityRow({
 
   return (
     <Animated.View
-      entering={FadeInDown.delay(45 + index * 35).duration(300).springify().damping(18)}
+      entering={FadeInDown.delay(45 + index * 35).duration(300)}
       style={{
         borderBottomWidth: isLast ? 0 : 1,
         borderBottomColor: colors.border,

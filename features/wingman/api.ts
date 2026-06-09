@@ -31,11 +31,14 @@ function getApiBaseUrl() {
 
 const API_BASE_URL = getApiBaseUrl();
 const REQUEST_TIMEOUT_MS = 4500;
+// LLM-backed requests (chat turns, flow runs) legitimately take tens of seconds.
+const LLM_REQUEST_TIMEOUT_MS = 90_000;
 
 type RequestOptions = {
   method?: string;
   token?: string | null;
   body?: unknown;
+  timeoutMs?: number;
 };
 
 async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -45,7 +48,7 @@ async function requestJson<T>(path: string, options: RequestOptions = {}): Promi
   const timeout = setTimeout(() => {
     didTimeout = true;
     controller.abort(timeoutError);
-  }, REQUEST_TIMEOUT_MS);
+  }, options.timeoutMs ?? REQUEST_TIMEOUT_MS);
 
   // Only advertise a JSON body when we actually send one. Fastify rejects an
   // empty body when Content-Type is application/json (FST_ERR_CTP_EMPTY_JSON_BODY),
@@ -118,6 +121,17 @@ export async function beginAppConnection(token: string, app: string) {
   await Linking.openURL(initiateUrl);
 }
 
+export type ChatHistoryItem = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt?: string;
+};
+
+export async function fetchChatHistory(token: string) {
+  return requestJson<{ items: ChatHistoryItem[] }>('/chat/history', { token });
+}
+
 export async function fetchBriefing(token: string) {
   return requestJson<Briefing>('/briefing/today', { token });
 }
@@ -162,6 +176,8 @@ export async function runFlow(token: string, flowId: string) {
   return requestJson<{ result: FlowRunResult }>(`/flows/${flowId}/run`, {
     method: 'POST',
     token,
+    // Flow runs execute real tool steps server-side; give them room.
+    timeoutMs: LLM_REQUEST_TIMEOUT_MS,
   });
 }
 
@@ -178,6 +194,7 @@ export async function sendChat(token: string, message: string) {
     method: 'POST',
     token,
     body: { message },
+    timeoutMs: LLM_REQUEST_TIMEOUT_MS,
   });
 }
 

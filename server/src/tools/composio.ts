@@ -16,6 +16,8 @@ export type ComposioRuntime = {
   initiateConnection(userId: string, toolkit: string, callbackUrl: string): Promise<{ url: string | null; connectionId: string | null }>;
   /** Toolkit slugs the user has an ACTIVE connected account for (Composio = source of truth). */
   connectedToolkits(userId: string): Promise<Set<string>>;
+  /** Whether a managed auth config exists for this toolkit (i.e. OAuth can actually start). */
+  hasAuthConfig(toolkit: string): boolean;
 };
 
 export function createComposioRuntime(env: { COMPOSIO_API_KEY?: string; COMPOSIO_AUTH_CONFIGS?: string }): ComposioRuntime {
@@ -29,6 +31,7 @@ export function createComposioRuntime(env: { COMPOSIO_API_KEY?: string; COMPOSIO
       async execute() { throw new Error('Composio is not configured. Set COMPOSIO_API_KEY in server/.env.'); },
       async initiateConnection() { return { url: null, connectionId: null }; },
       async connectedToolkits() { return new Set<string>(); },
+      hasAuthConfig() { return false; },
     };
   }
 
@@ -94,6 +97,9 @@ export function createComposioRuntime(env: { COMPOSIO_API_KEY?: string; COMPOSIO
         console.warn('[composio] connectedToolkits failed:', (err as Error).message);
         return new Set<string>();
       }
+    },
+    hasAuthConfig(toolkit) {
+      return Boolean(authConfigs[toolkit.toLowerCase()]);
     },
   };
 }

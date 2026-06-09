@@ -62,6 +62,8 @@ export type AppConnection = {
   color: string;
   connected: boolean;
   connectedAt?: string;
+  /** False when Composio is enabled but no auth config exists for this toolkit yet. */
+  available?: boolean;
 };
 
 export type CalendarEvent = {

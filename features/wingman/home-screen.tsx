@@ -7,6 +7,7 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import { AppCard } from '@/features/wingman/app-card';
 import { useWingman } from '@/features/wingman/provider';
 import {
   IconGlyph,
@@ -55,7 +56,7 @@ const shortcuts = [
 export function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { briefing, colors, connectedAppsCount, currentUser } = useWingman();
+  const { apps, beginConnection, briefing, colors, connectedAppsCount, currentUser } = useWingman();
   const formattedDate = new Date().toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -91,6 +92,23 @@ export function HomeScreen() {
   const greetingName = currentUser?.name.split(' ')[0] ?? 'Sam';
   const shortcutInk = '#1B2240';
 
+  // Connected apps first, then connectable suggestions, then "soon" apps as a
+  // last resort — the grid should never render empty.
+  const homeApps = React.useMemo(() => {
+    const connected = apps.filter((app) => app.connected);
+    const ready = apps.filter((app) => !app.connected && app.available !== false);
+    const soon = apps.filter((app) => !app.connected && app.available === false);
+    return [...connected, ...ready, ...soon].slice(0, 4);
+  }, [apps]);
+
+  const handleConnect = React.useCallback(
+    async (appId: string) => {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await beginConnection(appId);
+    },
+    [beginConnection],
+  );
+
   const openChat = async (prompt?: string) => {
     await Haptics.selectionAsync();
 
@@ -112,7 +130,7 @@ export function HomeScreen() {
         gap: 18,
       }}>
       <Animated.View
-        entering={FadeInDown.duration(460).springify().damping(18)}
+        entering={FadeInDown.duration(460)}
         style={{ paddingTop: Math.max(insets.top + 14, 18) }}>
         <LinearGradient
           colors={[colors.sky400, colors.sky600]}
@@ -201,7 +219,7 @@ export function HomeScreen() {
         </LinearGradient>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(80).duration(380).springify().damping(18)}>
+      <Animated.View entering={FadeInDown.delay(80).duration(380)}>
       <Pressable onPress={() => void openChat()}>
         <StickerCard
           style={{
@@ -229,6 +247,45 @@ export function HomeScreen() {
       </Animated.View>
 
       <View style={{ gap: 10 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: colors.sky500 }} />
+            <Text
+              style={{
+                color: colors.fgSecondary,
+                fontFamily: wingmanFonts.text,
+                fontSize: 12,
+                fontWeight: '800',
+                letterSpacing: 1.1,
+                textTransform: 'uppercase',
+              }}>
+              Your apps
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => router.push('/apps')}
+            hitSlop={8}
+            style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 4, opacity: pressed ? 0.6 : 1 })}>
+            <Text
+              style={{
+                color: colors.sky500,
+                fontFamily: wingmanFonts.text,
+                fontSize: 12,
+                fontWeight: '800',
+              }}>
+              {`${connectedAppsCount} connected · See all`}
+            </Text>
+            <IconGlyph name="chevron-right" color={colors.sky500} size={14} />
+          </Pressable>
+        </View>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+          {homeApps.map((app, index) => (
+            <AppCard key={app.id} app={app} index={index} onConnect={handleConnect} width="48.6%" />
+          ))}
+        </View>
+      </View>
+
+      <View style={{ gap: 10 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <View style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: colors.coral500 }} />
           <Text
@@ -243,38 +300,40 @@ export function HomeScreen() {
             Quick shortcuts
           </Text>
         </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {shortcuts.map((shortcut, index) => (
             <Animated.View
               key={shortcut.id}
-              entering={FadeInDown.delay(140 + index * 60).duration(380).springify().damping(18)}
-              style={{ width: '47%' }}>
+              entering={FadeInDown.delay(140 + index * 60).duration(380)}
+              style={{ width: '48.6%' }}>
             <Pressable
               onPress={() => void openChat(shortcut.prompt)}
               style={({ pressed }) => ({
                 transform: [{ scale: pressed ? 0.97 : 1 }],
-                minHeight: 78,
+                minHeight: 52,
                 paddingHorizontal: 12,
-                paddingVertical: 12,
-                borderRadius: 16,
+                paddingVertical: 10,
+                borderRadius: 14,
                 borderWidth: 1.5,
                 borderColor: shortcut.borderColor,
                 backgroundColor: shortcut.color,
-                justifyContent: 'center',
+                flexDirection: 'row',
+                justifyContent: 'flex-start',
                 alignItems: 'center',
-                gap: 10,
+                gap: 8,
                 boxShadow: '0 3px 0 rgba(27, 34, 64, 0.10)',
                 borderCurve: 'continuous',
               })}>
-              <Text style={{ fontSize: 21, textAlign: 'center' }}>{shortcut.emoji}</Text>
+              <Text style={{ fontSize: 17 }}>{shortcut.emoji}</Text>
               <Text
+                numberOfLines={1}
                 style={{
+                  flex: 1,
                   color: shortcutInk,
                   fontFamily: wingmanFonts.display,
-                  fontSize: 15,
+                  fontSize: 14,
                   fontWeight: '700',
-                  lineHeight: 18,
-                  textAlign: 'center',
+                  lineHeight: 17,
                 }}>
                 {shortcut.title}
               </Text>
@@ -284,61 +343,13 @@ export function HomeScreen() {
         </View>
       </View>
 
-      <Animated.View entering={FadeInDown.delay(180).duration(380).springify().damping(18)}>
-      <Pressable onPress={() => router.push('/apps')}>
-        <StickerCard
-          style={{
-            padding: 16,
-            borderRadius: 20,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 12,
-          }}>
-          <View
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 14,
-              borderWidth: 1.5,
-              borderColor: withAlpha(colors.sky500, 0.4),
-              backgroundColor: withAlpha(colors.sky500, 0.12),
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-            <IconGlyph name="apps" color={colors.sky500} size={18} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                color: colors.ink,
-                fontFamily: wingmanFonts.display,
-                fontSize: 18,
-                fontWeight: '700',
-              }}>
-              Browse apps
-            </Text>
-            <Text
-              style={{
-                color: colors.fgSecondary,
-                fontFamily: wingmanFonts.text,
-                fontSize: 13,
-                fontWeight: '600',
-              }}>
-              {connectedAppsCount} connected, 1,000+ available
-            </Text>
-          </View>
-          <IconGlyph name="chevron-right" color={colors.fgMuted} size={18} />
-        </StickerCard>
-      </Pressable>
-      </Animated.View>
-
       <View style={{ gap: 10 }}>
         <WingmanLabel>Today&apos;s brief</WingmanLabel>
         <View style={{ gap: 10 }}>
           {briefingItems.map((item, index) => (
             <Animated.View
               key={item.id}
-              entering={FadeInDown.delay(200 + index * 70).duration(380).springify().damping(18)}>
+              entering={FadeInDown.delay(200 + index * 70).duration(380)}>
             <StickerCard
               style={{
                 padding: 14,
