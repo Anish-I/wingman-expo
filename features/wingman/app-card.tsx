@@ -30,10 +30,10 @@ export function AppCard({
         backgroundColor={app.connected ? withAlpha(app.color, resolvedTheme === 'dark' ? 0.16 : 0.07) : colors.card}
         borderColor={app.connected ? withAlpha(app.color, 0.58) : colors.border}
         style={{
-          minHeight: 104,
+          minHeight: 92,
           padding: 10,
           justifyContent: 'space-between',
-          gap: 8,
+          gap: 6,
         }}>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
           <View

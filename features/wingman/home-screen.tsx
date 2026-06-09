@@ -92,6 +92,17 @@ export function HomeScreen() {
   const greetingName = currentUser?.name.split(' ')[0] ?? 'Sam';
   const shortcutInk = '#1B2240';
 
+  const hour = new Date().getHours();
+  const dayPart = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
+
+  // Keep hero chips to one truthful row: meetings + flows from the briefing,
+  // apps count computed live (the server chip can lag behind Composio).
+  const heroChips = React.useMemo(() => {
+    const briefingChips = briefing?.chips ?? [];
+    const keep = briefingChips.filter((chip) => !chip.includes('app')).slice(0, 2);
+    return [...keep, `${connectedAppsCount} ${connectedAppsCount === 1 ? 'app' : 'apps'} connected`];
+  }, [briefing?.chips, connectedAppsCount]);
+
   // Connected apps first, then connectable suggestions, then "soon" apps as a
   // last resort — the grid should never render empty.
   const homeApps = React.useMemo(() => {
@@ -137,84 +148,80 @@ export function HomeScreen() {
           start={{ x: 0.05, y: 0 }}
           end={{ x: 0.95, y: 1 }}
           style={{
-            padding: 18,
-            borderRadius: 24,
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            borderRadius: 22,
             borderWidth: 1.5,
             borderColor: colors.sky700,
             overflow: 'hidden',
             boxShadow: '0 4px 0 rgba(29, 78, 216, 0.20), 0 10px 24px rgba(59, 130, 246, 0.34)',
             borderCurve: 'continuous',
           }}>
-          <View
-            style={{
-              position: 'absolute',
-              top: -34,
-              right: -28,
-              width: 146,
-              height: 146,
-              borderRadius: 999,
-              backgroundColor: withAlpha(colors.sun300, 0.34),
-            }}
-          />
-          <View style={{ gap: 10 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View style={{ width: 10, height: 10, borderRadius: 999, backgroundColor: colors.sun300 }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ flex: 1, gap: 8 }}>
               <Text
                 style={{
-                  color: withAlpha('#FFFFFF', 0.84),
+                  color: withAlpha('#FFFFFF', 0.8),
                   fontFamily: wingmanFonts.text,
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: '800',
                   letterSpacing: 1.1,
                   textTransform: 'uppercase',
                 }}>
-                {`Today - ${formattedDate}`}
+                {`Today · ${formattedDate}`}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: '#FFFFFF',
+                  fontFamily: wingmanFonts.display,
+                  fontSize: 24,
+                  fontWeight: '700',
+                  lineHeight: 28,
+                  letterSpacing: -0.6,
+                }}>
+                {`${dayPart}, ${greetingName}!`}
+              </Text>
+              <Text
+                style={{
+                  color: withAlpha('#FFFFFF', 0.88),
+                  fontFamily: wingmanFonts.text,
+                  fontSize: 13,
+                  fontWeight: '600',
+                }}>
+                Here&apos;s the plan.
               </Text>
             </View>
-            <Text
-              style={{
-                color: '#FFFFFF',
-                fontFamily: wingmanFonts.display,
-                fontSize: 28,
-                fontWeight: '700',
-                lineHeight: 30,
-                letterSpacing: -0.8,
-                maxWidth: 220,
-              }}>
-              {`Morning, ${greetingName}!\nHere's the plan.`}
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {(briefing?.chips ?? ['0 meetings', '0 flows running', '0 apps connected']).map((pill) => (
-                <View
-                  key={pill}
-                  style={{
-                    paddingHorizontal: 11,
-                    paddingVertical: 6,
-                    borderRadius: 999,
-                    backgroundColor: withAlpha('#FFFFFF', 0.22),
-                  }}>
-                  <Text
-                    style={{
-                      color: '#FFFFFF',
-                      fontFamily: wingmanFonts.text,
-                      fontSize: 12,
-                      fontWeight: '800',
-                    }}>
-                    {pill}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-          <View style={{ position: 'absolute', right: 2, bottom: -2 }}>
             <Image
               source={heroPipSource}
               contentFit="contain"
               style={{
-                width: 126,
-                height: 112,
+                width: 84,
+                height: 76,
               }}
             />
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+            {heroChips.map((pill) => (
+              <View
+                key={pill}
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 999,
+                  backgroundColor: withAlpha('#FFFFFF', 0.22),
+                }}>
+                <Text
+                  style={{
+                    color: '#FFFFFF',
+                    fontFamily: wingmanFonts.text,
+                    fontSize: 11,
+                    fontWeight: '800',
+                  }}>
+                  {pill}
+                </Text>
+              </View>
+            ))}
           </View>
         </LinearGradient>
       </Animated.View>
