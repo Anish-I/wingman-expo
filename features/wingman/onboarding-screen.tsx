@@ -66,59 +66,6 @@ const onboardingTitleWidths: Record<string, number> = {
   privacy: 320,
 };
 
-// Two little Pip pals per scene — they drift around the edges for extra life.
-const scenePipPals: Record<string, [number, number]> = {
-  hello: [require('@/assets/pip/pip-wave.png'), require('@/assets/pip/pip-excited.png')],
-  text: [require('@/assets/pip/pip-love.png'), require('@/assets/pip/pip-happy.png')],
-  apps: [require('@/assets/pip/pip-coding.png'), require('@/assets/pip/pip-cool.png')],
-  flows: [require('@/assets/pip/pip-checkmark.png'), require('@/assets/pip/pip-clap.png')],
-  privacy: [require('@/assets/pip/pip-ninja.png'), require('@/assets/pip/pip-thumbsup.png')],
-};
-
-/** A small Pip that floats up/down (and sways a touch) forever. */
-function FloatingPip({
-  source,
-  size,
-  duration,
-  delay = 0,
-  style,
-}: {
-  source: number;
-  size: number;
-  duration: number;
-  delay?: number;
-  style?: React.ComponentProps<typeof View>['style'];
-}) {
-  const drift = React.useRef(new Animated.Value(0)).current;
-
-  React.useEffect(() => {
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.delay(delay),
-        Animated.timing(drift, { toValue: 1, duration, useNativeDriver: true }),
-        Animated.timing(drift, { toValue: 0, duration, useNativeDriver: true }),
-      ]),
-    );
-    animation.start();
-    return () => animation.stop();
-  }, [delay, drift, duration]);
-
-  return (
-    <View pointerEvents="none" style={style}>
-      <RNAnimated.View entering={ZoomIn.delay(220 + delay).duration(320)}>
-        <Animated.View
-          style={{
-            transform: [
-              { translateY: drift.interpolate({ inputRange: [0, 1], outputRange: [0, -9] }) },
-              { rotate: drift.interpolate({ inputRange: [0, 1], outputRange: ['-3deg', '3deg'] }) },
-            ],
-          }}>
-          <Image source={source} contentFit="contain" style={{ width: size, height: size }} />
-        </Animated.View>
-      </RNAnimated.View>
-    </View>
-  );
-}
 
 function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] }) {
   const { colors, resolvedTheme } = useWingman();
@@ -703,33 +650,6 @@ export function OnboardingScreen() {
           {`${String(sceneIndex + 1).padStart(2, '0')} / ${String(onboardingScenes.length).padStart(2, '0')}`}
         </Text>
       </View>
-
-      {/* Pip pals — purely decorative flock, re-keyed per scene so they pop in fresh. */}
-      <FloatingPip
-        key={`pal-a-${currentScene.id}`}
-        source={scenePipPals[currentScene.id]?.[0] ?? scenePipPals.hello[0]}
-        size={52}
-        duration={1400}
-        style={{
-          position: 'absolute',
-          top: insets.top + 96,
-          right: wingmanLayout.screenPadding + 4,
-          zIndex: 5,
-        }}
-      />
-      <FloatingPip
-        key={`pal-b-${currentScene.id}`}
-        source={scenePipPals[currentScene.id]?.[1] ?? scenePipPals.hello[1]}
-        size={44}
-        duration={1750}
-        delay={350}
-        style={{
-          position: 'absolute',
-          bottom: 64 + insets.bottom,
-          left: wingmanLayout.screenPadding + 2,
-          zIndex: 5,
-        }}
-      />
 
       <View
         style={{
