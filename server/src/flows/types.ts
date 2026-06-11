@@ -8,11 +8,18 @@
  * recipes/visual-builder features build on later.
  */
 
-/** A weekly schedule. `days` empty = every day. days use 0=Sun … 6=Sat. */
+/**
+ * A flow schedule. Two shapes share this type:
+ *  - **Recurring** (default): runs at `hour:minute` on the given weekdays
+ *    (`days` empty = every day; days use 0=Sun … 6=Sat).
+ *  - **One-shot**: when `date` ('YYYY-MM-DD', local) is set, the flow runs once
+ *    at that date + `hour:minute` and then auto-pauses. `days` is ignored.
+ */
 export type FlowSchedule = {
   hour: number; // 0–23 (local server time)
   minute: number; // 0–59
-  days: number[]; // subset of 0–6; empty means every day
+  days: number[]; // subset of 0–6; empty means every day (ignored when `date` is set)
+  date?: string; // 'YYYY-MM-DD' — one-shot: run once at this date+time, then auto-pause
 };
 
 /** One step: call `tool` with `args`. `args` strings may contain templates (see runner). */

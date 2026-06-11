@@ -3,7 +3,7 @@ import type { ComposioRuntime } from '../tools/composio.js';
 import type { LLMProvider } from '../llm/types.js';
 import type { Notifier } from '../push/notifier.js';
 import { buildRegistry } from '../tools/registry.js';
-import { isDue } from './schedule.js';
+import { isDue, isOneShot } from './schedule.js';
 import { runFlowDefinition } from './runner.js';
 
 /**
@@ -62,6 +62,11 @@ export async function runDueFlows(
       const result = await runFlowDefinition(def, registry, ctx);
       await store.recordFlowRun(flow.id, flow.userId, now.toISOString());
       ran += 1;
+
+      // A one-shot flow runs exactly once — pause it so it never fires again.
+      if (isOneShot(def.schedule)) {
+        await store.setFlowActive(flow.id, flow.userId, false).catch(() => {});
+      }
 
       if (result.ok) {
         await store.addActivity(flow.userId, {

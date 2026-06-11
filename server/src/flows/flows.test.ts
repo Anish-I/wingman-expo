@@ -46,6 +46,19 @@ test('describeSchedule renders friendly strings', () => {
   assert.equal(describeSchedule({ hour: 12, minute: 0, days: [1] }), 'Mon 12:00 PM');
 });
 
+test('one-shot schedule: validate, describe, and due-after-target', () => {
+  const once = { hour: 4, minute: 0, days: [], date: '2024-01-01' }; // Mon 4:00 AM
+  assert.equal(isValidSchedule(once), true);
+  assert.equal(isValidSchedule({ hour: 4, minute: 0, days: [], date: '2024-13-40' }), false, 'bad date rejected');
+  assert.equal(describeSchedule(once), 'Once · Jan 1, 4:00 AM');
+
+  // Due once the target time has arrived, and stays due afterwards (catch-up);
+  // the scheduler pauses it after the first run so it never repeats.
+  assert.equal(isDue(once, at(3, 59, 1)), false, 'before target not due');
+  assert.equal(isDue(once, at(4, 0, 1)), true, 'at target is due');
+  assert.equal(isDue(once, at(6, 30, 1)), true, 'after target still due (missed-tick catch-up)');
+});
+
 test('resolveTemplate substitutes prior step outputs by id and index', () => {
   const byId = new Map([['a', 'hello']]);
   const byIndex = ['hello'];

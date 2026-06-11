@@ -339,8 +339,9 @@ export const createFlow: ServerTool = {
       'IMPORTANT — do not invent values you were not given. Never guess an email address, phone number, or ' +
       'Slack channel. If a required arg (e.g. a recipient email) is missing, leave it as an empty string; the ' +
       'flow is saved paused so the user can fill it in. Do NOT put a placeholder like "friend" in an email field.\n' +
-      'Schedules are RECURRING — they repeat at the given clock time; there is no one-shot/"run once" timer. For a ' +
-      'relative request like "in 2 hours", compute the clock time and set a daily schedule at that time.\n\n' +
+      'SCHEDULE — for a one-time request ("after 2 hours", "tonight at 8", "once tomorrow") set schedule.date ' +
+      '(YYYY-MM-DD) plus hour/minute: it runs once then auto-pauses. For a recurring request set days and omit ' +
+      'date. Omit schedule entirely (null) for a manual-only flow.\n\n' +
       'Available step tools:\n' +
       catalogForPrompt(),
     parameters: {
@@ -356,7 +357,8 @@ export const createFlow: ServerTool = {
           properties: {
             hour: { type: 'integer', description: '0–23 (local server time).' },
             minute: { type: 'integer', description: '0–59.' },
-            days: { type: 'array', items: { type: 'integer' }, description: 'Weekdays 0=Sun..6=Sat; empty = every day.' },
+            days: { type: 'array', items: { type: 'integer' }, description: 'Recurring weekdays 0=Sun..6=Sat; empty = every day. Omit when using date.' },
+            date: { type: 'string', description: 'One-shot only: YYYY-MM-DD. Runs once at this date+hour:minute, then auto-pauses.' },
           },
         },
         steps: {
@@ -414,7 +416,7 @@ export const createFlow: ServerTool = {
 
     // Normalize the schedule the model passed (or null for manual-only).
     let schedule: FlowSchedule | null = null;
-    const rawSched = args.schedule as { hour?: unknown; minute?: unknown; days?: unknown } | null | undefined;
+    const rawSched = args.schedule as { hour?: unknown; minute?: unknown; days?: unknown; date?: unknown } | null | undefined;
     if (rawSched && typeof rawSched === 'object') {
       const hour = Number(rawSched.hour);
       const minute = Number(rawSched.minute);
@@ -422,7 +424,9 @@ export const createFlow: ServerTool = {
         const days = Array.isArray(rawSched.days)
           ? (rawSched.days as unknown[]).filter((d): d is number => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6)
           : [];
-        schedule = { hour, minute, days };
+        // One-shot when a valid YYYY-MM-DD date is supplied; days are then ignored.
+        const date = typeof rawSched.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawSched.date) ? rawSched.date : undefined;
+        schedule = date ? { hour, minute, days: [], date } : { hour, minute, days };
       }
     }
 

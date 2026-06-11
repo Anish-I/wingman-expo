@@ -169,14 +169,23 @@ function catalogForStep(step: FlowStep, catalog: StepCatalogItem[]): StepCatalog
 
 // --- Schedule helpers (mirror the server's schedule model) -----------------
 
-type SchedulePresetKey = 'manual' | 'daily' | 'weekdays' | 'weekends';
+type SchedulePresetKey = 'manual' | 'once' | 'daily' | 'weekdays' | 'weekends';
+type OnceDay = 'today' | 'tomorrow';
 
 const schedulePresets: { key: SchedulePresetKey; label: string; days: number[] | null }[] = [
   { key: 'manual', label: 'Manual', days: null },
+  { key: 'once', label: 'Once', days: [] }, // one-shot — date supplied at build time
   { key: 'daily', label: 'Daily', days: [] },
   { key: 'weekdays', label: 'Weekdays', days: [1, 2, 3, 4, 5] },
   { key: 'weekends', label: 'Weekends', days: [0, 6] },
 ];
+
+/** Local 'YYYY-MM-DD' for today (+offsetDays). Used to date one-shot flows. */
+function localDateString(offsetDays: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 const SCHEDULE_STEP_MINUTES = 30;
 
@@ -188,6 +197,7 @@ function sameDaySet(a: number[], b: number[]) {
 
 function presetKeyFromSchedule(schedule: FlowSchedule | null): SchedulePresetKey {
   if (!schedule) return 'manual';
+  if (schedule.date) return 'once';
   const days = [...schedule.days].sort((a, b) => a - b);
   if (days.length === 0) return 'daily';
   if (sameDaySet(days, [1, 2, 3, 4, 5])) return 'weekdays';
@@ -195,7 +205,14 @@ function presetKeyFromSchedule(schedule: FlowSchedule | null): SchedulePresetKey
   return 'daily';
 }
 
-function scheduleFor(key: SchedulePresetKey, hour: number, minute: number): FlowSchedule | null {
+/** Which "Once" day a loaded schedule maps to (defaults to today). */
+function onceDayFromSchedule(schedule: FlowSchedule | null): OnceDay {
+  return schedule?.date && schedule.date === localDateString(1) ? 'tomorrow' : 'today';
+}
+
+function scheduleFor(key: SchedulePresetKey, hour: number, minute: number, onceDay: OnceDay = 'today'): FlowSchedule | null {
+  if (key === 'manual') return null;
+  if (key === 'once') return { hour, minute, days: [], date: localDateString(onceDay === 'tomorrow' ? 1 : 0) };
   const preset = schedulePresets.find((entry) => entry.key === key);
   if (!preset || preset.days === null) return null;
   return { hour, minute, days: preset.days };
@@ -245,14 +262,18 @@ function TriggerCard({
   hour,
   minute,
   presetKey,
+  onceDay,
   onSelectPreset,
+  onSelectOnceDay,
   onShiftTime,
 }: {
   color: string;
   hour: number;
   minute: number;
   presetKey: SchedulePresetKey;
+  onceDay: OnceDay;
   onSelectPreset: (key: SchedulePresetKey) => void;
+  onSelectOnceDay: (day: OnceDay) => void;
   onShiftTime: (deltaMinutes: number) => void;
 }) {
   const { colors } = useWingman();
@@ -285,7 +306,7 @@ function TriggerCard({
             Trigger
           </Text>
           <Text style={{ color: colors.ink, fontFamily: wingmanFonts.display, fontSize: 15, fontWeight: '700' }}>
-            {presetKey === 'manual' ? 'Run manually' : `Runs ${describeSchedule(scheduleFor(presetKey, hour, minute))}`}
+            {presetKey === 'manual' ? 'Run manually' : `Runs ${describeSchedule(scheduleFor(presetKey, hour, minute, onceDay))}`}
           </Text>
         </View>
       </View>
@@ -319,6 +340,36 @@ function TriggerCard({
           );
         })}
       </View>
+
+      {presetKey === 'once' ? (
+        <View style={{ flexDirection: 'row', gap: 5 }}>
+          {(['today', 'tomorrow'] as OnceDay[]).map((day) => {
+            const active = day === onceDay;
+            return (
+              <Pressable
+                key={day}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={day === 'today' ? 'Run today' : 'Run tomorrow'}
+                onPress={() => onSelectOnceDay(day)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 7,
+                  borderRadius: 999,
+                  borderWidth: 1.5,
+                  borderColor: active ? colors.sky500 : colors.border,
+                  backgroundColor: active ? colors.sky500 : colors.cardAlt,
+                  alignItems: 'center',
+                  borderCurve: 'continuous',
+                }}>
+                <Text style={{ color: active ? '#FFFFFF' : colors.fgSecondary, fontFamily: wingmanFonts.text, fontSize: 10, fontWeight: '900' }}>
+                  {day === 'today' ? 'Today' : 'Tomorrow'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
 
       {presetKey !== 'manual' ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
@@ -571,6 +622,7 @@ export function FlowBuilderScreen() {
   const [schedulePresetKey, setSchedulePresetKey] = React.useState<SchedulePresetKey>('manual');
   const [scheduleHour, setScheduleHour] = React.useState(8);
   const [scheduleMinute, setScheduleMinute] = React.useState(0);
+  const [onceDay, setOnceDay] = React.useState<OnceDay>('today');
   const [steps, setSteps] = React.useState<FlowStep[]>([]);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -579,8 +631,8 @@ export function FlowBuilderScreen() {
   const [status, setStatus] = React.useState<BuilderStatus | null>(null);
 
   const schedule = React.useMemo(
-    () => scheduleFor(schedulePresetKey, scheduleHour, scheduleMinute),
-    [schedulePresetKey, scheduleHour, scheduleMinute],
+    () => scheduleFor(schedulePresetKey, scheduleHour, scheduleMinute, onceDay),
+    [schedulePresetKey, scheduleHour, scheduleMinute, onceDay],
   );
 
   // Hydrate the real definition (title + schedule + steps) when the flow opens.
@@ -597,6 +649,7 @@ export function FlowBuilderScreen() {
       const loadedSchedule = detail?.definition?.schedule ?? null;
       setTitle(detail?.title ?? flow.title);
       setSchedulePresetKey(presetKeyFromSchedule(loadedSchedule));
+      setOnceDay(onceDayFromSchedule(loadedSchedule));
       if (loadedSchedule) {
         setScheduleHour(loadedSchedule.hour);
         setScheduleMinute(loadedSchedule.minute);
@@ -622,6 +675,12 @@ export function FlowBuilderScreen() {
     void Haptics.selectionAsync();
     markDirty();
     setSchedulePresetKey(key);
+  }, [markDirty]);
+
+  const selectOnceDay = React.useCallback((day: OnceDay) => {
+    void Haptics.selectionAsync();
+    markDirty();
+    setOnceDay(day);
   }, [markDirty]);
 
   const shiftTime = React.useCallback((deltaMinutes: number) => {
@@ -839,7 +898,9 @@ export function FlowBuilderScreen() {
           hour={scheduleHour}
           minute={scheduleMinute}
           presetKey={schedulePresetKey}
+          onceDay={onceDay}
           onSelectPreset={selectPreset}
+          onSelectOnceDay={selectOnceDay}
           onShiftTime={shiftTime}
         />
 

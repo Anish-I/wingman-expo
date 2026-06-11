@@ -105,6 +105,8 @@ const flowScheduleSchema = z.object({
   hour: z.number().int().min(0).max(23),
   minute: z.number().int().min(0).max(59),
   days: z.array(z.number().int().min(0).max(6)).default([]),
+  // One-shot: when set, the flow runs once at this date + hour:minute, then auto-pauses.
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 const flowStepSchema = z.object({
@@ -741,22 +743,28 @@ app.post('/flows/generate', async (request, reply) => {
   // "tonight") resolves correctly instead of echoing the literal hour.
   const settings = await store.getSettings(user.id);
   const tz = settings.timezone || 'UTC';
+  const now = new Date();
   const localNow = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     weekday: 'long',
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
-  }).format(new Date());
+  }).format(now);
+  // 'en-CA' yields YYYY-MM-DD, the exact format the one-shot `date` field expects.
+  const localDate = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
 
   const system =
     'You build a single automation (flow) for the user by calling the create_flow tool exactly once. ' +
-    `The user's current local time is ${localNow} (${tz}). For relative timing like "in 2 hours", "tonight", ` +
-    'or "tomorrow morning", compute the clock time from that. Schedules are RECURRING (they repeat at the given ' +
-    'time) — there is no one-shot timer, so a relative request becomes a daily schedule at the computed time. ' +
+    `The user's current local time is ${localNow} (${tz}); today's date is ${localDate}. ` +
+    'For relative timing like "in 2 hours", "tonight", or "tomorrow morning", compute the clock time from that ' +
+    '(carry into the next day if it rolls past midnight). ' +
+    'TIMING — choose one: (a) a ONE-TIME request ("after 2 hours", "tonight at 8", "once tomorrow") → set ' +
+    'schedule.date to the computed YYYY-MM-DD plus hour/minute; it runs once then auto-pauses. ' +
+    '(b) a RECURRING request ("every morning", "weekdays at 9") → set days (omit date). (c) no timing → null (manual). ' +
     'Choose steps only from the catalog in the tool description. Never invent values you were not given — ' +
     'especially email addresses, phone numbers, or channel names; leave a missing required value blank and the ' +
-    'flow will be saved paused for the user to complete. If the user implies no timing, use null (manual). ' +
+    'flow will be saved paused for the user to complete. ' +
     'Always call create_flow — never reply with plain text.';
 
   let toolCall: ToolCall | null = null;

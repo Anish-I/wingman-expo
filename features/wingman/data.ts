@@ -115,11 +115,17 @@ export type FlowItem = {
   active: boolean;
 };
 
-/** A weekly schedule. `days` empty = every day; days use 0=Sun … 6=Sat. */
+/**
+ * A flow schedule (mirrors the server).
+ *  - Recurring: `hour:minute` on `days` (empty = every day; 0=Sun … 6=Sat).
+ *  - One-shot: when `date` ('YYYY-MM-DD') is set, runs once at that date+time
+ *    then auto-pauses; `days` is ignored.
+ */
 export type FlowSchedule = {
   hour: number;
   minute: number;
   days: number[];
+  date?: string;
 };
 
 /** One executable step: call `tool` with `args`. Mirrors the server model. */
@@ -178,8 +184,16 @@ export type CatalogNode = {
 };
 
 const FLOW_WEEKDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const FLOW_MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FLOW_WEEKDAYS = [1, 2, 3, 4, 5];
 const FLOW_WEEKEND = [0, 6];
+
+/** Format a one-shot date string ('YYYY-MM-DD') as e.g. "Jun 16". */
+function fmtOnceDate(dateStr: string): string {
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return dateStr;
+  return `${FLOW_MONTH_ABBR[Number(m[2]) - 1] ?? m[2]} ${Number(m[3])}`;
+}
 
 function sameDaySet(a: number[], b: number[]): boolean {
   if (a.length !== b.length) return false;
@@ -196,6 +210,7 @@ export function describeSchedule(schedule: FlowSchedule | null): string {
   const suffix = schedule.hour < 12 ? 'AM' : 'PM';
   const h12 = schedule.hour % 12 === 0 ? 12 : schedule.hour % 12;
   const clock = `${h12}:${String(schedule.minute).padStart(2, '0')} ${suffix}`;
+  if (schedule.date) return `Once · ${fmtOnceDate(schedule.date)}, ${clock}`;
   const days = [...schedule.days].sort((a, b) => a - b);
   if (days.length === 0) return `Daily ${clock}`;
   if (sameDaySet(days, FLOW_WEEKDAYS)) return `Weekdays ${clock}`;
