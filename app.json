@@ -38,6 +38,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "67a53e77-d7de-45b0-9906-99d39fa60abb"
+      }
+    },
+    "owner": "ghandour12"
   }
 }
