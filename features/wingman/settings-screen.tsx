@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { confirmAction, notify } from '@/features/wingman/confirm';
 import { useWingman } from '@/features/wingman/provider';
+import { usePipController } from '@/features/wingman/pip-controller';
 import {
   IconGlyph,
   ScreenHeader,
@@ -84,16 +85,19 @@ export function SettingsScreen() {
     pushSupported,
     signOut,
   } = useWingman();
+  const { play: pipPlay } = usePipController();
 
   const onSendTest = React.useCallback(async () => {
     await Haptics.selectionAsync();
     const result = await sendTestNotification();
     if (result.ok) {
       notify('Sent', 'A test notification is on its way to this device.');
+      pipPlay('wave', { say: 'Ping! 🔔' });
     } else {
       notify('Could not send', result.error ?? 'Push is not available here.');
+      pipPlay('sad', { say: 'Hmm, no luck.' });
     }
-  }, [sendTestNotification]);
+  }, [sendTestNotification, pipPlay]);
 
   const onDeleteAccount = React.useCallback(() => {
     void (async () => {
@@ -117,8 +121,11 @@ export function SettingsScreen() {
     async (next: string) => {
       await Haptics.selectionAsync();
       await setQuietHours(next);
+      pipPlay(next.trim().toLowerCase() === 'off' ? 'cool' : 'sleeping', {
+        say: next.trim().toLowerCase() === 'off' ? 'Always on ✨' : 'Night night 😴',
+      });
     },
-    [setQuietHours],
+    [setQuietHours, pipPlay],
   );
 
   const onSignOut = React.useCallback(() => {
@@ -233,6 +240,9 @@ export function SettingsScreen() {
               onValueChange={async (value) => {
                 await Haptics.selectionAsync();
                 setPushEnabled(value);
+                pipPlay(value ? 'excited' : 'sleeping', {
+                  say: value ? 'Pings on! 🔔' : 'Going quiet 🤫',
+                });
               }}
             />
           )}
@@ -297,6 +307,9 @@ export function SettingsScreen() {
               onValueChange={async (value) => {
                 await Haptics.selectionAsync();
                 setMemoryEnabled(value);
+                pipPlay(value ? 'love' : 'thinking', {
+                  say: value ? "I'll remember 💙" : 'Forgetting… 🫧',
+                });
               }}
             />
           )}

@@ -13,6 +13,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWingman } from '@/features/wingman/provider';
+import { usePipController } from '@/features/wingman/pip-controller';
 import {
   IconGlyph,
   ScreenHeader,
@@ -56,6 +57,7 @@ export function EditProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { colors, currentUser, updateProfile } = useWingman();
+  const { play: pipPlay } = usePipController();
 
   const [name, setName] = React.useState(currentUser?.name ?? '');
   const [phone, setPhone] = React.useState(currentUser?.phone ?? '');
@@ -72,6 +74,8 @@ export function EditProfileScreen() {
     const result = await updateProfile({ name: name.trim(), phone: phone.trim() });
     if (result.ok) {
       try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch { /* best-effort */ }
+      // Set the emote before navigating; it lands on the (visible) Settings screen.
+      pipPlay('cool', { say: 'Looking sharp! ✨' });
       router.back();
       return;
     }
