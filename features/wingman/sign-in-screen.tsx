@@ -43,7 +43,7 @@ function FieldShell({
   hint,
 }: {
   label: string;
-  icon: 'mail' | 'phone' | 'chat' | 'settings';
+  icon: 'mail' | 'phone' | 'chat' | 'lock-closed';
   children: React.ReactNode;
   hint?: string;
 }) {
@@ -127,8 +127,6 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
   const {
     colors,
     createAccount,
-    demoAccount,
-    signInWithDemoAccount,
     signInWithPassword,
   } = useWingman();
   const [tab, setTab] = React.useState<AuthTab>('password');
@@ -148,28 +146,6 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
   const emailIsValid = /\S+@\S+\.\S+/.test(credentialEmail);
   const passwordIsValid = credentialPassword.trim().length >= 6;
   const canSubmitPassword = emailIsValid && passwordIsValid && (!isCreateAccount || displayName.trim().length >= 2);
-
-  const useDemoAccount = () => {
-    setDisplayName(demoAccount.name);
-    setCredentialEmail(demoAccount.email);
-    setCredentialPassword(demoAccount.password);
-    setStatusMessage('Demo account filled in. Tap Sign in to continue.');
-  };
-
-  const signInAsDemo = async () => {
-    if (submitting) return;
-    setSubmitting(true);
-    setStatusMessage(null);
-    const result = await signInWithDemoAccount();
-    if (!result.ok) {
-      await runHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error));
-      setStatusMessage(result.error ?? 'Could not sign in to the demo account.');
-      setSubmitting(false);
-      return;
-    }
-    await runHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
-    router.replace('/(tabs)');
-  };
 
   const submitPasswordFlow = async () => {
     if (submitting) return;
@@ -270,63 +246,6 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
             />
           </Animated.View>
 
-          {tab === 'password' && !isCreateAccount ? (
-            <Animated.View entering={FadeIn.duration(160)}>
-              <StickerCard
-                backgroundColor={colors.cardAlt}
-                borderColor={colors.border}
-                style={{
-                  padding: 16,
-                  gap: 8,
-                }}>
-                <WingmanLabel color={colors.sky500}>Demo account</WingmanLabel>
-                <Text
-                  style={{
-                    color: colors.ink,
-                    fontFamily: wingmanFonts.display,
-                    fontSize: 20,
-                    fontWeight: '700',
-                  }}>
-                  Try it instantly
-                </Text>
-                <Text
-                  style={{
-                    color: colors.fgSecondary,
-                    fontFamily: wingmanFonts.text,
-                    fontSize: 13,
-                    fontWeight: '500',
-                    lineHeight: 19,
-                  }}>
-                  {`A real seeded account on the backend (${demoAccount.email}). Sign in to explore with sample flows and activity.`}
-                </Text>
-                <View style={{ flexDirection: 'row', gap: 16, marginTop: 2 }}>
-                  <Pressable onPress={signInAsDemo} disabled={submitting}>
-                    <Text
-                      style={{
-                        color: colors.sky500,
-                        fontFamily: wingmanFonts.text,
-                        fontSize: 13,
-                        fontWeight: '800',
-                      }}>
-                      Sign in as demo
-                    </Text>
-                  </Pressable>
-                  <Pressable onPress={useDemoAccount}>
-                    <Text
-                      style={{
-                        color: colors.fgSecondary,
-                        fontFamily: wingmanFonts.text,
-                        fontSize: 13,
-                        fontWeight: '800',
-                      }}>
-                      Fill the form
-                    </Text>
-                  </Pressable>
-                </View>
-              </StickerCard>
-            </Animated.View>
-          ) : null}
-
           {statusMessage ? (
             <Animated.View entering={FadeIn.duration(160)}>
               <StickerCard
@@ -392,7 +311,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
 
                 <FieldShell
                   label="Password"
-                  icon="settings"
+                  icon="lock-closed"
                   hint="At least six characters.">
                   <TextInput
                     value={credentialPassword}

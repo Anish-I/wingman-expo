@@ -62,8 +62,6 @@ type WingmanContextValue = {
   colors: WingmanColors;
   currentUser: CurrentUser | null;
   session: AuthSession | null;
-  /** Seeded demo account credentials (a real backend account, used to prefill the sign-in form). */
-  demoAccount: { name: string; email: string; password: string };
   briefing: Briefing | null;
   apps: AppIntegration[];
   flows: FlowItem[];
@@ -77,7 +75,6 @@ type WingmanContextValue = {
   /** Non-null when the last data load failed (server unreachable, etc.). */
   dataError: string | null;
   completeOnboarding: () => void;
-  signInWithDemoAccount: () => Promise<AuthResult>;
   signInWithPassword: (email: string, password: string) => Promise<AuthResult>;
   createAccount: (account: { name: string; email: string; password: string }) => Promise<AuthResult>;
   signOut: () => void;
@@ -103,15 +100,6 @@ const WingmanContext = React.createContext<WingmanContextValue | null>(null);
 
 const AUTH_STAGE_KEY = 'wingman.auth-stage';
 const SESSION_KEY = 'wingman.session';
-
-// The seeded demo account is a REAL Supabase account (created by the server's
-// demo seed). Prefilling these into the sign-in form is a convenience, not fake
-// auth — sign-in still goes through the real backend and a wrong password fails.
-const demoAccount = {
-  name: 'Sam Ortega',
-  email: 'sam@wingman.dev',
-  password: 'pigeon123',
-};
 
 const memoryStorage = new Map<string, string>();
 
@@ -292,16 +280,6 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     setCurrentUser(nextSession.user);
     setAuthStage('authenticated');
   }, []);
-
-  const signInWithDemoAccount = React.useCallback(async (): Promise<AuthResult> => {
-    try {
-      const result = await demoLogin({ email: demoAccount.email, password: demoAccount.password });
-      persistSession(result.session);
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : 'Sign-in failed.' };
-    }
-  }, [persistSession]);
 
   const signInWithPassword = React.useCallback(async (email: string, password: string): Promise<AuthResult> => {
     try {
@@ -518,7 +496,6 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     colors,
     currentUser,
     session,
-    demoAccount,
     briefing,
     apps,
     flows,
@@ -530,7 +507,6 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     dataLoading,
     dataError,
     completeOnboarding: () => setAuthStage('sign-in'),
-    signInWithDemoAccount,
     signInWithPassword,
     createAccount,
     signOut: clearSession,

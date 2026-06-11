@@ -293,12 +293,6 @@ export function SettingsScreen() {
             color={colors.sky500}
             onPress={() => router.push('/ui-critique' as never)}
           />
-          <SettingsRow
-            icon="mail"
-            label="Demo account"
-            color={colors.sun500}
-            value="sam@wingman.dev"
-          />
         </SectionGroup>
         </Animated.View>
       ) : null}

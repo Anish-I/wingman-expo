@@ -190,23 +190,30 @@ function serializeAuth(account: { id: string; name: string; email: string; phone
 // GET,HEAD,POST — so list every verb we use, or PUT/PATCH/DELETE get blocked by
 // the browser preflight (Save = PUT, flow toggle = PATCH, delete account = DELETE).
 /**
- * Apps with their TRUE connection status. Composio is the source of truth for
- * OAuth connections, so when it's enabled we reconcile our DB flag against the
- * user's ACTIVE connected accounts (and persist the correction, so the rest of
- * the app — registry, tools, briefing — agrees). When Composio is off we fall
- * back to the stored flag.
+ * Apps with their TRUE connection status.
+ *
+ * The per-user `app_connections` table is the source of truth: a row exists only
+ * after THIS user completed the Composio OAuth redirect (see /connect/callback)
+ * or was explicitly disconnected. We do NOT add connections from Composio's
+ * account list — `connectedAccounts.list` is not reliably scoped per user (its
+ * `user_ids` filter is ignored by the hosted API, so one developer's leftover
+ * Google account would otherwise show as "connected" for every new sign-up).
+ *
+ * Composio is used only to DOWNGRADE: if we recorded a connection but Composio
+ * reports no active account for that toolkit at all, treat it as lapsed. It can
+ * never fabricate a connection a user didn't make.
  */
 async function appsForUser(userId: string) {
   const apps = await store.getApps(userId);
   if (!composioRuntime.enabled) return apps;
+  // Only worth querying Composio if the user actually has a stored connection.
+  if (!apps.some((app) => app.connected)) return apps;
   const live = await composioRuntime.connectedToolkits(userId);
   for (const app of apps) {
-    const nowConnected = live.has(app.slug.toLowerCase());
-    if (app.connected !== nowConnected) {
-      if (nowConnected) await store.connectApp(userId, app.slug);
-      else await store.disconnectApp(userId, app.slug);
-      app.connected = nowConnected;
-      if (!nowConnected) app.connectedAt = undefined;
+    if (app.connected && !live.has(app.slug.toLowerCase())) {
+      await store.disconnectApp(userId, app.slug);
+      app.connected = false;
+      app.connectedAt = undefined;
     }
   }
   return apps;
