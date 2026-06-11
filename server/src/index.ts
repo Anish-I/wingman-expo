@@ -213,7 +213,14 @@ function serializeAuth(account: { id: string; name: string; email: string; phone
  * never fabricate a connection a user didn't make.
  */
 async function appsForUser(userId: string) {
-  const apps = await store.getApps(userId);
+  let apps = await store.getApps(userId);
+  // Only surface apps we actually have a Composio auth config for — anything
+  // else 400s on connect. When no auth configs exist (offline/demo, mock
+  // connect), keep the full catalog so the demo flow still works.
+  const configured = composioRuntime.configuredToolkits;
+  if (configured.size > 0) {
+    apps = apps.filter((app) => configured.has(app.slug.toLowerCase()));
+  }
   if (!composioRuntime.enabled) return apps;
   // Only worth querying Composio if the user actually has a stored connection.
   if (!apps.some((app) => app.connected)) return apps;
@@ -634,6 +641,21 @@ app.put('/flows/:id', async (request, reply) => {
     return reply.status(404).send({ error: 'Flow not found.' });
   }
   return reply.send({ flow });
+});
+
+// Delete a flow. Owner-scoped in the store, so this can only remove the
+// requester's own flow; 404 if it doesn't exist or isn't theirs.
+app.delete('/flows/:id', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const params = z.object({ id: z.string() }).parse(request.params);
+  const deleted = await store.deleteFlow(params.id, user.id);
+  if (!deleted) {
+    return reply.status(404).send({ error: 'Flow not found.' });
+  }
+  return reply.send({ ok: true });
 });
 
 // Manually run a flow now (used by "Test" / dry-run and immediate execution).

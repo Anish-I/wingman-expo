@@ -11,6 +11,9 @@ import type { ToolDefinition, ToolCall } from '../llm/types.js';
 
 export type ComposioRuntime = {
   enabled: boolean;
+  /** Toolkit slugs we have an auth config for — the only apps that can actually
+   *  connect. Drives which apps the UI offers. */
+  configuredToolkits: Set<string>;
   listTools(userId: string, toolkits?: string[]): Promise<{ definition: ToolDefinition; slug: string; toolkit: string }[]>;
   execute(userId: string, call: ToolCall): Promise<string>;
   initiateConnection(userId: string, toolkit: string, callbackUrl: string): Promise<{ url: string | null; connectionId: string | null }>;
@@ -21,10 +24,12 @@ export type ComposioRuntime = {
 export function createComposioRuntime(env: { COMPOSIO_API_KEY?: string; COMPOSIO_AUTH_CONFIGS?: string }): ComposioRuntime {
   const apiKey = env.COMPOSIO_API_KEY?.trim();
   const authConfigs = parseAuthConfigs(env.COMPOSIO_AUTH_CONFIGS);
+  const configuredToolkits = new Set(Object.keys(authConfigs));
   const enabled = Boolean(apiKey);
   if (!enabled) {
     return {
       enabled: false,
+      configuredToolkits,
       async listTools() { return []; },
       async execute() { throw new Error('Composio is not configured. Set COMPOSIO_API_KEY in server/.env.'); },
       async initiateConnection() { return { url: null, connectionId: null }; },
@@ -36,6 +41,7 @@ export function createComposioRuntime(env: { COMPOSIO_API_KEY?: string; COMPOSIO
 
   return {
     enabled: true,
+    configuredToolkits,
     async listTools(userId, toolkits) {
       const slugs = (toolkits ?? Object.keys(authConfigs)).filter(Boolean);
       if (slugs.length === 0) return [];

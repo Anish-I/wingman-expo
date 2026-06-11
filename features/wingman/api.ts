@@ -203,6 +203,13 @@ export async function runFlow(token: string, flowId: string) {
   });
 }
 
+export async function deleteFlow(token: string, flowId: string) {
+  return requestJson<{ ok: boolean }>(`/flows/${flowId}`, {
+    method: 'DELETE',
+    token,
+  });
+}
+
 export async function sendChat(token: string, message: string) {
   return requestJson<{
     assistantMessage: string;

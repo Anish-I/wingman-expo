@@ -470,6 +470,13 @@ export class PgStore {
     return flow;
   }
 
+  /** Delete a flow. Owner-scoped so a user can only ever remove their own.
+   *  Returns true if a row was actually deleted. */
+  async deleteFlow(flowId: string, userId: string): Promise<boolean> {
+    const res = await this.pool.query('DELETE FROM flows WHERE id = $1 AND user_id = $2', [flowId, userId]);
+    return (res.rowCount ?? 0) > 0;
+  }
+
   async setFlowActive(flowId: string, userId: string, active: boolean): Promise<Flow | null> {
     const res = await this.pool.query(
       'UPDATE flows SET active = $1 WHERE id = $2 AND user_id = $3 RETURNING id, emoji, title, description, trigger, runs, color, active, app_slug AS "appSlug"',

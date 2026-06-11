@@ -6,6 +6,7 @@ import {
   clearChat,
   createFlow as createFlowRequest,
   deleteAccount as deleteAccountRequest,
+  deleteFlow as deleteFlowRequest,
   demoCreateAccount,
   demoLogin,
   fetchActivity,
