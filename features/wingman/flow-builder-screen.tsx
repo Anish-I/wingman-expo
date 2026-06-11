@@ -169,53 +169,65 @@ function catalogForStep(step: FlowStep, catalog: StepCatalogItem[]): StepCatalog
 
 // --- Schedule helpers (mirror the server's schedule model) -----------------
 
-type SchedulePresetKey = 'manual' | 'once' | 'daily' | 'weekdays' | 'weekends';
-type OnceDay = 'today' | 'tomorrow';
+type TriggerMode = 'manual' | 'once' | 'daily' | 'weekly';
 
-const schedulePresets: { key: SchedulePresetKey; label: string; days: number[] | null }[] = [
-  { key: 'manual', label: 'Manual', days: null },
-  { key: 'once', label: 'Once', days: [] }, // one-shot — date supplied at build time
-  { key: 'daily', label: 'Daily', days: [] },
-  { key: 'weekdays', label: 'Weekdays', days: [1, 2, 3, 4, 5] },
-  { key: 'weekends', label: 'Weekends', days: [0, 6] },
+const triggerModes: { key: TriggerMode; label: string }[] = [
+  { key: 'manual', label: 'Manual' },
+  { key: 'once', label: 'Once' },
+  { key: 'daily', label: 'Daily' },
+  { key: 'weekly', label: 'Weekly' },
 ];
+
+const SCHEDULE_STEP_MINUTES = 30;
+const ONCE_DATE_RANGE = 60; // upcoming days offered by the "Once" date strip
+const WEEKDAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']; // index = day-of-week (0=Sun)
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function pad2(n: number) {
+  return String(n).padStart(2, '0');
+}
 
 /** Local 'YYYY-MM-DD' for today (+offsetDays). Used to date one-shot flows. */
 function localDateString(offsetDays: number): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-const SCHEDULE_STEP_MINUTES = 30;
-
-function sameDaySet(a: number[], b: number[]) {
-  if (a.length !== b.length) return false;
-  const set = new Set(a);
-  return b.every((value) => set.has(value));
+/** The upcoming calendar days the "Once" date picker offers. */
+function upcomingDates(count: number): { date: string; top: string; day: number }[] {
+  const today = new Date();
+  const out: { date: string; top: string; day: number }[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+    out.push({
+      date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+      top: i === 0 ? 'Today' : i === 1 ? 'Tmrw' : WEEKDAY_SHORT[d.getDay()],
+      day: d.getDate(),
+    });
+  }
+  return out;
 }
 
-function presetKeyFromSchedule(schedule: FlowSchedule | null): SchedulePresetKey {
+function modeFromSchedule(schedule: FlowSchedule | null): TriggerMode {
   if (!schedule) return 'manual';
   if (schedule.date) return 'once';
-  const days = [...schedule.days].sort((a, b) => a - b);
-  if (days.length === 0) return 'daily';
-  if (sameDaySet(days, [1, 2, 3, 4, 5])) return 'weekdays';
-  if (sameDaySet(days, [0, 6])) return 'weekends';
-  return 'daily';
+  if (schedule.days.length === 0) return 'daily';
+  return 'weekly';
 }
 
-/** Which "Once" day a loaded schedule maps to (defaults to today). */
-function onceDayFromSchedule(schedule: FlowSchedule | null): OnceDay {
-  return schedule?.date && schedule.date === localDateString(1) ? 'tomorrow' : 'today';
-}
-
-function scheduleFor(key: SchedulePresetKey, hour: number, minute: number, onceDay: OnceDay = 'today'): FlowSchedule | null {
-  if (key === 'manual') return null;
-  if (key === 'once') return { hour, minute, days: [], date: localDateString(onceDay === 'tomorrow' ? 1 : 0) };
-  const preset = schedulePresets.find((entry) => entry.key === key);
-  if (!preset || preset.days === null) return null;
-  return { hour, minute, days: preset.days };
+/** Build the server-shaped schedule from the builder's trigger state. */
+function buildSchedule(
+  mode: TriggerMode,
+  hour: number,
+  minute: number,
+  onceDate: string,
+  weeklyDays: number[],
+): FlowSchedule | null {
+  if (mode === 'manual') return null;
+  if (mode === 'once') return { hour, minute, days: [], date: onceDate };
+  if (mode === 'weekly') return { hour, minute, days: [...weeklyDays].sort((a, b) => a - b) };
+  return { hour, minute, days: [] }; // daily = every day
 }
 
 function clockLabel(hour: number, minute: number) {
@@ -261,22 +273,27 @@ function TriggerCard({
   color,
   hour,
   minute,
-  presetKey,
-  onceDay,
-  onSelectPreset,
-  onSelectOnceDay,
+  mode,
+  onceDate,
+  weeklyDays,
+  onSelectMode,
+  onSelectOnceDate,
+  onToggleWeekday,
   onShiftTime,
 }: {
   color: string;
   hour: number;
   minute: number;
-  presetKey: SchedulePresetKey;
-  onceDay: OnceDay;
-  onSelectPreset: (key: SchedulePresetKey) => void;
-  onSelectOnceDay: (day: OnceDay) => void;
+  mode: TriggerMode;
+  onceDate: string;
+  weeklyDays: number[];
+  onSelectMode: (mode: TriggerMode) => void;
+  onSelectOnceDate: (date: string) => void;
+  onToggleWeekday: (day: number) => void;
   onShiftTime: (deltaMinutes: number) => void;
 }) {
   const { colors } = useWingman();
+  const dates = React.useMemo(() => upcomingDates(ONCE_DATE_RANGE), []);
 
   return (
     <View
@@ -306,21 +323,21 @@ function TriggerCard({
             Trigger
           </Text>
           <Text style={{ color: colors.ink, fontFamily: wingmanFonts.display, fontSize: 15, fontWeight: '700' }}>
-            {presetKey === 'manual' ? 'Run manually' : `Runs ${describeSchedule(scheduleFor(presetKey, hour, minute, onceDay))}`}
+            {mode === 'manual' ? 'Run manually' : `Runs ${describeSchedule(buildSchedule(mode, hour, minute, onceDate, weeklyDays))}`}
           </Text>
         </View>
       </View>
 
       <View style={{ flexDirection: 'row', gap: 5 }}>
-        {schedulePresets.map((preset) => {
-          const active = preset.key === presetKey;
+        {triggerModes.map((entry) => {
+          const active = entry.key === mode;
           return (
             <Pressable
-              key={preset.key}
+              key={entry.key}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={`Trigger ${preset.label}`}
-              onPress={() => onSelectPreset(preset.key)}
+              accessibilityLabel={`Trigger ${entry.label}`}
+              onPress={() => onSelectMode(entry.key)}
               style={{
                 flex: 1,
                 paddingVertical: 7,
@@ -334,36 +351,74 @@ function TriggerCard({
               <Text
                 numberOfLines={1}
                 style={{ color: active ? '#FFFFFF' : colors.fgSecondary, fontFamily: wingmanFonts.text, fontSize: 10, fontWeight: '900' }}>
-                {preset.label}
+                {entry.label}
               </Text>
             </Pressable>
           );
         })}
       </View>
 
-      {presetKey === 'once' ? (
+      {mode === 'once' ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: 6, paddingVertical: 1 }}>
+          {dates.map((d) => {
+            const active = d.date === onceDate;
+            return (
+              <Pressable
+                key={d.date}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Run on ${d.top} ${d.day}`}
+                onPress={() => onSelectOnceDate(d.date)}
+                style={{
+                  width: 50,
+                  paddingVertical: 7,
+                  borderRadius: 14,
+                  borderWidth: 1.5,
+                  borderColor: active ? colors.sky500 : colors.border,
+                  backgroundColor: active ? colors.sky500 : colors.cardAlt,
+                  alignItems: 'center',
+                  gap: 1,
+                  borderCurve: 'continuous',
+                }}>
+                <Text style={{ color: active ? '#FFFFFF' : colors.fgSecondary, fontFamily: wingmanFonts.text, fontSize: 9, fontWeight: '900' }}>
+                  {d.top}
+                </Text>
+                <Text style={{ color: active ? '#FFFFFF' : colors.ink, fontFamily: wingmanFonts.display, fontSize: 16, fontWeight: '800' }}>
+                  {d.day}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
+
+      {mode === 'weekly' ? (
         <View style={{ flexDirection: 'row', gap: 5 }}>
-          {(['today', 'tomorrow'] as OnceDay[]).map((day) => {
-            const active = day === onceDay;
+          {WEEKDAY_LETTERS.map((letter, day) => {
+            const active = weeklyDays.includes(day);
             return (
               <Pressable
                 key={day}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                accessibilityLabel={day === 'today' ? 'Run today' : 'Run tomorrow'}
-                onPress={() => onSelectOnceDay(day)}
+                accessibilityLabel={`${WEEKDAY_SHORT[day]} ${active ? 'on' : 'off'}`}
+                onPress={() => onToggleWeekday(day)}
                 style={{
                   flex: 1,
-                  paddingVertical: 7,
+                  aspectRatio: 1,
                   borderRadius: 999,
                   borderWidth: 1.5,
                   borderColor: active ? colors.sky500 : colors.border,
                   backgroundColor: active ? colors.sky500 : colors.cardAlt,
                   alignItems: 'center',
+                  justifyContent: 'center',
                   borderCurve: 'continuous',
                 }}>
-                <Text style={{ color: active ? '#FFFFFF' : colors.fgSecondary, fontFamily: wingmanFonts.text, fontSize: 10, fontWeight: '900' }}>
-                  {day === 'today' ? 'Today' : 'Tomorrow'}
+                <Text style={{ color: active ? '#FFFFFF' : colors.fgSecondary, fontFamily: wingmanFonts.text, fontSize: 12, fontWeight: '900' }}>
+                  {letter}
                 </Text>
               </Pressable>
             );
@@ -371,7 +426,7 @@ function TriggerCard({
         </View>
       ) : null}
 
-      {presetKey !== 'manual' ? (
+      {mode !== 'manual' ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
           <Pressable
             accessibilityRole="button"
@@ -619,10 +674,11 @@ export function FlowBuilderScreen() {
   );
 
   const [title, setTitle] = React.useState(flow.title);
-  const [schedulePresetKey, setSchedulePresetKey] = React.useState<SchedulePresetKey>('manual');
+  const [triggerMode, setTriggerMode] = React.useState<TriggerMode>('manual');
   const [scheduleHour, setScheduleHour] = React.useState(8);
   const [scheduleMinute, setScheduleMinute] = React.useState(0);
-  const [onceDay, setOnceDay] = React.useState<OnceDay>('today');
+  const [onceDate, setOnceDate] = React.useState<string>(() => localDateString(0));
+  const [weeklyDays, setWeeklyDays] = React.useState<number[]>([1, 2, 3, 4, 5]);
   const [steps, setSteps] = React.useState<FlowStep[]>([]);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -631,8 +687,8 @@ export function FlowBuilderScreen() {
   const [status, setStatus] = React.useState<BuilderStatus | null>(null);
 
   const schedule = React.useMemo(
-    () => scheduleFor(schedulePresetKey, scheduleHour, scheduleMinute, onceDay),
-    [schedulePresetKey, scheduleHour, scheduleMinute, onceDay],
+    () => buildSchedule(triggerMode, scheduleHour, scheduleMinute, onceDate, weeklyDays),
+    [triggerMode, scheduleHour, scheduleMinute, onceDate, weeklyDays],
   );
 
   // Hydrate the real definition (title + schedule + steps) when the flow opens.
@@ -648,8 +704,14 @@ export function FlowBuilderScreen() {
       if (cancelled) return;
       const loadedSchedule = detail?.definition?.schedule ?? null;
       setTitle(detail?.title ?? flow.title);
-      setSchedulePresetKey(presetKeyFromSchedule(loadedSchedule));
-      setOnceDay(onceDayFromSchedule(loadedSchedule));
+      setTriggerMode(modeFromSchedule(loadedSchedule));
+      setOnceDate(loadedSchedule?.date ?? localDateString(0));
+      // Keep a sensible weekly default unless the loaded flow already picks days.
+      if (loadedSchedule && !loadedSchedule.date && loadedSchedule.days.length) {
+        setWeeklyDays(loadedSchedule.days);
+      } else {
+        setWeeklyDays([1, 2, 3, 4, 5]);
+      }
       if (loadedSchedule) {
         setScheduleHour(loadedSchedule.hour);
         setScheduleMinute(loadedSchedule.minute);
@@ -671,16 +733,24 @@ export function FlowBuilderScreen() {
     setStatus(null);
   }, []);
 
-  const selectPreset = React.useCallback((key: SchedulePresetKey) => {
+  const selectMode = React.useCallback((mode: TriggerMode) => {
     void Haptics.selectionAsync();
     markDirty();
-    setSchedulePresetKey(key);
+    setTriggerMode(mode);
   }, [markDirty]);
 
-  const selectOnceDay = React.useCallback((day: OnceDay) => {
+  const selectOnceDate = React.useCallback((date: string) => {
     void Haptics.selectionAsync();
     markDirty();
-    setOnceDay(day);
+    setOnceDate(date);
+  }, [markDirty]);
+
+  const toggleWeekday = React.useCallback((day: number) => {
+    void Haptics.selectionAsync();
+    markDirty();
+    setWeeklyDays((current) =>
+      current.includes(day) ? current.filter((d) => d !== day) : [...current, day].sort((a, b) => a - b),
+    );
   }, [markDirty]);
 
   const shiftTime = React.useCallback((deltaMinutes: number) => {
@@ -897,10 +967,12 @@ export function FlowBuilderScreen() {
           color={flow.color}
           hour={scheduleHour}
           minute={scheduleMinute}
-          presetKey={schedulePresetKey}
-          onceDay={onceDay}
-          onSelectPreset={selectPreset}
-          onSelectOnceDay={selectOnceDay}
+          mode={triggerMode}
+          onceDate={onceDate}
+          weeklyDays={weeklyDays}
+          onSelectMode={selectMode}
+          onSelectOnceDate={selectOnceDate}
+          onToggleWeekday={toggleWeekday}
           onShiftTime={shiftTime}
         />
 
