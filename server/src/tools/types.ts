@@ -22,7 +22,7 @@ export type ToolMeta =
   | { kind: 'memory_saved'; note: string }
   | { kind: 'app_action'; appSlug: string; action: string }
   | { kind: 'composio_result'; appSlug: string; tool: string }
-  | { kind: 'flow_created'; flowId: string; title: string };
+  | { kind: 'flow_created'; flowId: string; title: string; note?: string };
 
 export type ToolResult = {
   output: string;

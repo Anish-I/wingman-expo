@@ -467,7 +467,8 @@ export function FlowsScreen() {
       <ScrollView
         contentInsetAdjustmentBehavior="never"
         contentContainerStyle={{
-          paddingBottom: Math.max(insets.bottom, 16) + 86,
+          // Clears the pinned full-width Generate bar that floats just above the tab bar.
+          paddingBottom: Math.max(insets.bottom, 16) + 78,
           gap: 10,
         }}>
         <CompactHeader
@@ -488,39 +489,6 @@ export function FlowsScreen() {
             }}>
             <WingmanLabel>Your automations</WingmanLabel>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Pressable
-                onPress={() => {
-                  setGenError(null);
-                  setGenOpen(true);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Generate a flow with AI"
-                style={({ pressed }) => ({
-                  height: 34,
-                  paddingLeft: 11,
-                  paddingRight: 13,
-                  borderRadius: 17,
-                  borderWidth: 1.5,
-                  borderColor: withAlpha(colors.sky500, 0.5),
-                  backgroundColor: colors.card,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  opacity: pressed ? 0.82 : 1,
-                  borderCurve: 'continuous',
-                })}>
-                <Text style={{ fontSize: 14 }}>✨</Text>
-                <Text
-                  style={{
-                    color: colors.sky700,
-                    fontFamily: wingmanFonts.text,
-                    fontSize: 12,
-                    fontWeight: '800',
-                    letterSpacing: 0,
-                  }}>
-                  Generate
-                </Text>
-              </Pressable>
               <Animated.View style={newFlowAnimatedStyle}>
                 <Pressable
                   onPressIn={() => {
@@ -608,6 +576,55 @@ export function FlowsScreen() {
           ) : null}
         </View>
       </ScrollView>
+
+      {/* Pinned full-width "Generate a flow" bar — sits just above the tab bar.
+          This screen is laid out ABOVE the tab bar, so `bottom` here is measured
+          from the tab-bar top (no insets needed — the tab bar already owns them).
+          The GlobalPip mascot floats ~26px above the tab-bar top and rises over
+          this bar's right corner; the label is centered so Pip never covers it. */}
+      <Animated.View
+        entering={FadeIn.delay(160).duration(300)}
+        pointerEvents="box-none"
+        style={{
+          position: 'absolute',
+          left: wingmanLayout.screenPadding,
+          right: wingmanLayout.screenPadding,
+          bottom: 16,
+        }}>
+        <Pressable
+          onPress={() => {
+            setGenError(null);
+            setGenOpen(true);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Generate a flow with AI"
+          style={({ pressed }) => ({
+            height: 46,
+            borderRadius: 23,
+            borderWidth: 1.5,
+            borderColor: withAlpha(colors.sky500, 0.5),
+            backgroundColor: colors.card,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            opacity: pressed ? 0.85 : 1,
+            boxShadow: stickerShadow(resolvedTheme),
+            borderCurve: 'continuous',
+          })}>
+          <Text style={{ fontSize: 15 }}>✨</Text>
+          <Text
+            style={{
+              color: colors.sky700,
+              fontFamily: wingmanFonts.text,
+              fontSize: 14,
+              fontWeight: '800',
+              letterSpacing: 0,
+            }}>
+            Generate a flow
+          </Text>
+        </Pressable>
+      </Animated.View>
 
       <Modal visible={genOpen} transparent animationType="fade" onRequestClose={() => setGenOpen(false)}>
         <Pressable

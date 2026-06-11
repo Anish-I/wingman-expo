@@ -336,6 +336,11 @@ export const createFlow: ServerTool = {
       'a later step can reference an earlier one with {{steps.<id>.output}} in its args (ids are auto-assigned ' +
       'in order: use {{steps.0.output}} for the first step, etc.). Provide a `schedule` to run it automatically, ' +
       'or null for a manual-only flow. The flow goes live immediately unless `activate` is false.\n\n' +
+      'IMPORTANT — do not invent values you were not given. Never guess an email address, phone number, or ' +
+      'Slack channel. If a required arg (e.g. a recipient email) is missing, leave it as an empty string; the ' +
+      'flow is saved paused so the user can fill it in. Do NOT put a placeholder like "friend" in an email field.\n' +
+      'Schedules are RECURRING — they repeat at the given clock time; there is no one-shot/"run once" timer. For a ' +
+      'relative request like "in 2 hours", compute the clock time and set a daily schedule at that time.\n\n' +
       'Available step tools:\n' +
       catalogForPrompt(),
     parameters: {
@@ -384,6 +389,29 @@ export const createFlow: ServerTool = {
       return { output: `Couldn't create the flow: ${error} Use only tools from the catalog.` };
     }
 
+    // Catch values the model may have invented or left blank. We drop obviously
+    // bad emails (e.g. the literal "friend") so a flow never sends to a guess, and
+    // if any required field ends up empty we save the flow PAUSED instead of live.
+    const catalogByTool = new Map(FLOW_CATALOG.map((n) => [n.tool, n]));
+    const isEmail = (v: unknown) => typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+    const gaps: string[] = [];
+    for (const step of steps) {
+      const node = catalogByTool.get(step.tool);
+      if (!node?.fields) continue;
+      for (const field of node.fields) {
+        const emailField = field.name === 'to' || field.name.toLowerCase().includes('email');
+        const raw = step.args[field.name];
+        if (emailField && typeof raw === 'string' && raw.trim() && !isEmail(raw)) {
+          step.args[field.name] = ''; // not a real address — don't keep a guess like "friend"
+        }
+        const value = step.args[field.name];
+        const empty = value == null || (typeof value === 'string' && value.trim() === '');
+        if (!field.optional && empty) {
+          gaps.push(`${field.label.toLowerCase()} for "${node.label}"`);
+        }
+      }
+    }
+
     // Normalize the schedule the model passed (or null for manual-only).
     let schedule: FlowSchedule | null = null;
     const rawSched = args.schedule as { hour?: unknown; minute?: unknown; days?: unknown } | null | undefined;
@@ -407,17 +435,24 @@ export const createFlow: ServerTool = {
       steps,
     });
 
-    // createFlow sets active = steps.length > 0; honor an explicit activate:false.
+    // createFlow sets active = steps.length > 0; pause on an explicit activate:false
+    // OR when required fields are missing (so a half-built flow never runs live).
+    const incomplete = gaps.length > 0;
     let active = flow.active;
-    if (args.activate === false && flow.active) {
+    if ((args.activate === false || incomplete) && flow.active) {
       await ctx.store.setFlowActive(flow.id, ctx.userId, false);
       active = false;
     }
 
+    const note = incomplete
+      ? `I saved it paused — still need ${gaps.join(', ')}. Open the flow to fill that in, then turn it on.`
+      : undefined;
     const when = schedule ? `scheduled (${flow.trigger})` : 'manual';
     return {
-      output: `Created flow "${flow.title}" with ${steps.length} step${steps.length === 1 ? '' : 's'} — ${when}, ${active ? 'active now' : 'paused'}.`,
-      meta: { kind: 'flow_created', flowId: flow.id, title: flow.title },
+      output: incomplete
+        ? `Created "${flow.title}" but paused it — missing ${gaps.join(', ')}.`
+        : `Created flow "${flow.title}" with ${steps.length} step${steps.length === 1 ? '' : 's'} — ${when}, ${active ? 'active now' : 'paused'}.`,
+      meta: { kind: 'flow_created', flowId: flow.id, title: flow.title, note },
     };
   },
 };
