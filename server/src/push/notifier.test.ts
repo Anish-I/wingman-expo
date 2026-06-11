@@ -3,9 +3,9 @@ import test from 'node:test';
 
 import { isQuietNow } from './notifier.js';
 
-function at(hour: number): Date {
+function at(hour: number, minute = 30): Date {
   const d = new Date();
-  d.setHours(hour, 30, 0, 0);
+  d.setHours(hour, minute, 0, 0);
   return d;
 }
 
@@ -24,6 +24,17 @@ test('different windows parse correctly', () => {
   assert.equal(isQuietNow('9pm - 6am', at(20)), false);
   assert.equal(isQuietNow('11pm - 8am', at(23)), true);
   assert.equal(isQuietNow('11pm - 8am', at(22)), false);
+});
+
+test('half-hour windows respect minute boundaries', () => {
+  // "10:30pm - 7:00am" => quiet from 22:30 to 06:59
+  assert.equal(isQuietNow('10:30pm - 7:00am', at(22, 0)), false); // 22:00, before start
+  assert.equal(isQuietNow('10:30pm - 7:00am', at(22, 45)), true); // 22:45, inside
+  assert.equal(isQuietNow('10:30pm - 7:00am', at(6, 59)), true); // 06:59, inside
+  assert.equal(isQuietNow('10:30pm - 7:00am', at(7, 0)), false); // 07:00, at end
+  // Same-day (non-wrapping) window with minutes.
+  assert.equal(isQuietNow('1:00pm - 2:30pm', at(14, 15)), true);
+  assert.equal(isQuietNow('1:00pm - 2:30pm', at(14, 45)), false);
 });
 
 test('Off (or junk) is never quiet', () => {

@@ -34,41 +34,51 @@ type NotifierEnv = {
 
 const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
 
-function parseHour(token: string): number | null {
-  const m = token.trim().toLowerCase().match(/^(\d{1,2})\s*(am|pm)$/);
+/** Parse a clock token into minutes-since-midnight (0–1439), or null. Accepts a
+ *  bare hour ("10pm") or an hour:minute ("10:30pm", "7:00am"). */
+function parseTimeToken(token: string): number | null {
+  const m = token.trim().toLowerCase().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
   if (!m) return null;
-  const base = parseInt(m[1]!, 10) % 12;
-  return m[2] === 'pm' ? base + 12 : base;
+  const hour = parseInt(m[1]!, 10);
+  const minute = m[2] ? parseInt(m[2], 10) : 0;
+  if (hour < 1 || hour > 12 || minute > 59) return null;
+  const base = (hour % 12) + (m[3] === 'pm' ? 12 : 0);
+  return base * 60 + minute;
 }
 
-/** The hour-of-day (0–23) at `now` in the given IANA timezone. Falls back to the
- *  server's local hour when no zone is given or the zone is invalid. */
-function hourInZone(now: Date, timeZone?: string): number {
-  if (!timeZone) return now.getHours();
+/** The minute-of-day (0–1439) at `now` in the given IANA timezone. Falls back to
+ *  the server's local time when no zone is given or the zone is invalid. */
+function minuteInZone(now: Date, timeZone?: string): number {
+  if (!timeZone) return now.getHours() * 60 + now.getMinutes();
   try {
-    const parts = new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone }).formatToParts(now);
-    const raw = parts.find((p) => p.type === 'hour')?.value;
-    const h = raw ? parseInt(raw, 10) : now.getHours();
-    return h === 24 ? 0 : h; // some platforms render midnight as 24
+    const parts = new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric', minute: 'numeric', hour12: false, timeZone,
+    }).formatToParts(now);
+    const rawHour = parts.find((p) => p.type === 'hour')?.value;
+    const rawMinute = parts.find((p) => p.type === 'minute')?.value;
+    const h = rawHour ? parseInt(rawHour, 10) % 24 : now.getHours(); // some platforms render midnight as 24
+    const min = rawMinute ? parseInt(rawMinute, 10) : now.getMinutes();
+    return h * 60 + min;
   } catch {
-    return now.getHours();
+    return now.getHours() * 60 + now.getMinutes();
   }
 }
 
 /**
- * Is `now` inside the user's quiet-hours window? Windows like "10pm - 7am" wrap
- * past midnight. "Off" (or anything unparseable) means never quiet. Evaluated in
- * the user's `timeZone` when provided, else the server's local time.
+ * Is `now` inside the user's quiet-hours window? Windows like "10pm - 7am" or
+ * "10:30pm - 7:00am" wrap past midnight. "Off" (or anything unparseable) means
+ * never quiet. Evaluated in the user's `timeZone` when provided, else the
+ * server's local time.
  */
 export function isQuietNow(quietHours: string, now: Date = new Date(), timeZone?: string): boolean {
   if (!quietHours || quietHours.trim().toLowerCase() === 'off') return false;
   const parts = quietHours.split('-').map((s) => s.trim());
   if (parts.length !== 2) return false;
-  const start = parseHour(parts[0]!);
-  const end = parseHour(parts[1]!);
+  const start = parseTimeToken(parts[0]!);
+  const end = parseTimeToken(parts[1]!);
   if (start == null || end == null || start === end) return false;
-  const h = hourInZone(now, timeZone);
-  return start < end ? h >= start && h < end : h >= start || h < end;
+  const m = minuteInZone(now, timeZone);
+  return start < end ? m >= start && m < end : m >= start || m < end;
 }
 
 export function createNotifier(env: NotifierEnv): Notifier {
