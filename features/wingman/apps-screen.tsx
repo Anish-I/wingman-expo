@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import type { AppIntegration } from '@/features/wingman/data';
 import { useWingman } from '@/features/wingman/provider';
+import { usePipController } from '@/features/wingman/pip-controller';
 import {
   IconGlyph,
   ScreenHeader,
@@ -154,13 +155,15 @@ export function AppsScreen() {
   const router = useRouter();
   const { connected } = useLocalSearchParams<{ connected?: string }>();
   const { apps, beginConnection, colors, connectedAppsCount, refreshData } = useWingman();
+  const { play: pipPlay } = usePipController();
   const [query, setQuery] = React.useState('');
 
   React.useEffect(() => {
     if (connected) {
       void refreshData();
+      pipPlay('excited', { say: 'Connected! 🎉', ms: 2600 });
     }
-  }, [connected, refreshData]);
+  }, [connected, refreshData, pipPlay]);
 
   const filteredApps = apps.filter((app) =>
     app.name.toLowerCase().includes(query.trim().toLowerCase()),

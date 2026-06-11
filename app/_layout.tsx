@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import 'react-native-reanimated';
 
 import { WingmanProvider, useWingman } from '@/features/wingman/provider';
+import { GlobalPip, PipControllerProvider } from '@/features/wingman/pip-controller';
 
 export {
   // Catch any errors thrown by the Layout component.
@@ -49,7 +50,9 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <WingmanProvider>
-        <RootLayoutNav />
+        <PipControllerProvider>
+          <RootLayoutNav />
+        </PipControllerProvider>
       </WingmanProvider>
     </SafeAreaProvider>
   );
@@ -134,6 +137,7 @@ function RootLayoutNav() {
         <Stack.Screen name="flow-builder" />
         <Stack.Screen name="(tabs)" />
       </Stack>
+          <GlobalPip />
         </View>
       </View>
     </ThemeProvider>

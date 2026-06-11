@@ -15,6 +15,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useWingman } from '@/features/wingman/provider';
+import { usePipController } from '@/features/wingman/pip-controller';
 import {
   IconGlyph,
   Pip,
@@ -360,7 +361,13 @@ export function FlowsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { activeFlowsCount, colors, createFlow, flows, toggleFlow } = useWingman();
+  const { play: pipPlay } = usePipController();
   const newFlowScale = useSharedValue(1);
+
+  const handleToggleFlow = React.useCallback((id: string, next: boolean) => {
+    void toggleFlow(id, next);
+    if (next) pipPlay('clap', { say: 'On it! 🪶' });
+  }, [pipPlay, toggleFlow]);
 
   const totalRuns = flows.reduce((sum, flow) => sum + flow.runs, 0);
   const pausedCount = flows.length - activeFlowsCount;
@@ -463,9 +470,7 @@ export function FlowsScreen() {
                 onEdit={(id) => {
                   router.push(`/flow-builder?flowId=${encodeURIComponent(id)}` as never);
                 }}
-                onToggle={(id, next) => {
-                  void toggleFlow(id, next);
-                }}
+                onToggle={handleToggleFlow}
               />
             ))}
           </Animated.View>
