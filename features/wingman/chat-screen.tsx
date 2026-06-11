@@ -34,6 +34,7 @@ import {
   TypingDots,
 } from '@/features/wingman/primitives';
 import { wingmanFonts, wingmanLayout } from '@/features/wingman/theme';
+import { useVoiceDictation } from '@/features/wingman/voice-input';
 
 const showFloatingPipAnimation = false;
 
@@ -172,6 +173,9 @@ export function ChatScreen() {
     setChatMessages,
   } = useWingman();
   const [draft, setDraft] = React.useState('');
+  const draftRef = React.useRef(draft);
+  draftRef.current = draft;
+  const voice = useVoiceDictation(() => draftRef.current, setDraft);
   const [isTyping, setIsTyping] = React.useState(false);
   const [isComposerFocused, setIsComposerFocused] = React.useState(false);
   const [sendTick, setSendTick] = React.useState(0);
@@ -230,6 +234,7 @@ export function ChatScreen() {
       return;
     }
 
+    voice.stop();
     await Haptics.selectionAsync();
 
     setChatMessages((currentMessages) => [
@@ -522,6 +527,31 @@ export function ChatScreen() {
         ref={composerAnchorRef}
         onLayout={remeasureAnchors}
         style={{ paddingHorizontal: 14, paddingBottom: 18 }}>
+        {voice.error ? (
+          <Text
+            style={{
+              color: colors.error,
+              fontFamily: wingmanFonts.text,
+              fontSize: 12,
+              fontWeight: '500',
+              paddingHorizontal: 10,
+              paddingBottom: 6,
+            }}>
+            {voice.error}
+          </Text>
+        ) : voice.listening ? (
+          <Text
+            style={{
+              color: colors.fgSecondary,
+              fontFamily: wingmanFonts.text,
+              fontSize: 12,
+              fontWeight: '500',
+              paddingHorizontal: 10,
+              paddingBottom: 6,
+            }}>
+            Listening… speak now, tap ■ to stop.
+          </Text>
+        ) : null}
         <StickerCard
           borderColor={draft ? reaction.color : colors.border}
           style={{
@@ -567,19 +597,35 @@ export function ChatScreen() {
             onPress={() => {
               if (draft) {
                 void sendMessage();
+                return;
               }
+              if (voice.supported) {
+                voice.toggle();
+                return;
+              }
+              Alert.alert(
+                'Voice input',
+                'Voice dictation is available in the web app (Chrome, Edge, or Safari). On this device, type your message instead.',
+              );
             }}
+            accessibilityLabel={
+              draft ? 'Send message' : voice.listening ? 'Stop dictation' : 'Dictate message'
+            }
             style={{
               width: 40,
               height: 40,
               borderRadius: 20,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: draft ? reaction.color : colors.section,
+              backgroundColor: draft
+                ? reaction.color
+                : voice.listening
+                ? colors.error
+                : colors.section,
             }}>
             <IconGlyph
-              name={draft ? 'arrow-up' : 'mic'}
-              color={draft ? '#FFFFFF' : colors.fgSecondary}
+              name={draft ? 'arrow-up' : voice.listening ? 'stop' : 'mic'}
+              color={draft || voice.listening ? '#FFFFFF' : colors.fgSecondary}
               size={18}
             />
           </Pressable>

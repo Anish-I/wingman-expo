@@ -70,6 +70,7 @@ const iconMap = {
   search: { ion: 'search', fallback: '⌕' },
   sparkles: { ion: 'sparkles', fallback: '✦' },
   mic: { ion: 'mic', fallback: '◉' },
+  stop: { ion: 'stop', fallback: '■' },
   mail: { ion: 'mail', fallback: '✉' },
   time: { ion: 'time', fallback: '⏰' },
   music: { ion: 'musical-notes', fallback: '♪' },
