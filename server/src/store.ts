@@ -9,7 +9,10 @@ import type {
   CurrentUser,
   Flow,
   FlowWithDefinition,
+  PushSubscriptionInput,
+  PushTarget,
   UpdateFlowInput,
+  UserSettings,
 } from './types.js';
 import { openPg, closePg, type PgPool } from './db/postgres.js';
 import type { FlowDefinition } from './flows/types.js';
@@ -103,10 +106,20 @@ export class PgStore {
     }
     const pool = await openPg(connectionString);
     const store = new PgStore(pool);
+    await store.normalizeData();
     if (opts.seedDemoAccount ?? true) {
       await store.seedDemoAccount();
     }
     return store;
+  }
+
+  /**
+   * One-time data fixes that are safe to run on every boot (idempotent). Clears
+   * the legacy fabricated placeholder phone ('+1 (555) 000-0000') that older
+   * sign-ups inherited, so the Settings screen never shows a fake number again.
+   */
+  private async normalizeData(): Promise<void> {
+    await this.pool.query("UPDATE users SET phone = '' WHERE phone = '+1 (555) 000-0000'");
   }
 
   async close() {
@@ -203,7 +216,8 @@ export class PgStore {
        VALUES ($1,$2,$3,'',$4,$5,$6)
        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email
        RETURNING id, name, email, phone, tier, (xmax = 0) AS inserted`,
-      [input.id, input.name, input.email, '+1 (555) 000-0000', 'Pro', nowIso()],
+      // Phone starts empty — users set it themselves in Settings. We never invent one.
+      [input.id, input.name, input.email, '', 'Pro', nowIso()],
     );
     const row = res.rows[0] as UserRow & { inserted: boolean };
     return { user: toCurrentUser(row), created: row.inserted };
@@ -228,7 +242,8 @@ export class PgStore {
     const id = randomId('user');
     await this.pool.query(
       'INSERT INTO users (id, name, email, password_hash, phone, tier, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-      [id, input.name.trim(), email, hashPassword(input.password), '+1 (555) 000-0000', 'Pro', nowIso()],
+      // Phone starts empty — set later in Settings, never fabricated.
+      [id, input.name.trim(), email, hashPassword(input.password), '', 'Pro', nowIso()],
     );
     return { ok: true as const, account: (await this.getUserByEmail(email))! };
   }
@@ -255,6 +270,106 @@ export class PgStore {
 
   async deleteAccount(userId: string) {
     await this.pool.query('DELETE FROM users WHERE id = $1', [userId]);
+  }
+
+  /** Update profile fields the user controls. Only provided fields change; scoped
+   *  to the owner. Returns the fresh user, or null if the id doesn't exist. */
+  async updateProfile(userId: string, input: { name?: string; phone?: string }): Promise<CurrentUser | null> {
+    const res = await this.pool.query(
+      `UPDATE users
+          SET name  = COALESCE($2, name),
+              phone = COALESCE($3, phone)
+        WHERE id = $1
+        RETURNING id, name, email, phone, tier`,
+      [userId, input.name ?? null, input.phone ?? null],
+    );
+    const row = res.rows[0] as UserRow | undefined;
+    return row ? toCurrentUser(row) : null;
+  }
+
+  // --- settings ---
+
+  /** Read a user's settings, lazily creating the default row on first access so
+   *  every caller gets a concrete value (never null). Scoped to the owner. */
+  async getSettings(userId: string): Promise<UserSettings> {
+    const res = await this.pool.query(
+      'SELECT push_enabled AS "pushEnabled", quiet_hours AS "quietHours", memory_enabled AS "memoryEnabled" FROM user_settings WHERE user_id = $1',
+      [userId],
+    );
+    const row = res.rows[0] as UserSettings | undefined;
+    if (row) return { ...row, pushEnabled: Boolean(row.pushEnabled), memoryEnabled: Boolean(row.memoryEnabled) };
+    const defaults: UserSettings = { pushEnabled: true, quietHours: '10pm - 7am', memoryEnabled: true };
+    await this.pool.query(
+      'INSERT INTO user_settings (user_id, push_enabled, quiet_hours, memory_enabled, updated_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING',
+      [userId, defaults.pushEnabled, defaults.quietHours, defaults.memoryEnabled, nowIso()],
+    );
+    return defaults;
+  }
+
+  /** Patch settings (only provided fields). Upserts so the row exists. Scoped. */
+  async updateSettings(userId: string, input: Partial<UserSettings>): Promise<UserSettings> {
+    const current = await this.getSettings(userId);
+    const next: UserSettings = {
+      pushEnabled: input.pushEnabled ?? current.pushEnabled,
+      quietHours: input.quietHours ?? current.quietHours,
+      memoryEnabled: input.memoryEnabled ?? current.memoryEnabled,
+    };
+    await this.pool.query(
+      `INSERT INTO user_settings (user_id, push_enabled, quiet_hours, memory_enabled, updated_at)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (user_id) DO UPDATE SET push_enabled = EXCLUDED.push_enabled,
+         quiet_hours = EXCLUDED.quiet_hours, memory_enabled = EXCLUDED.memory_enabled, updated_at = EXCLUDED.updated_at`,
+      [userId, next.pushEnabled, next.quietHours, next.memoryEnabled, nowIso()],
+    );
+    return next;
+  }
+
+  // --- push subscriptions ---
+
+  /** Register (or refresh) a push target for this user. Web subs key on endpoint;
+   *  native on expo_token — re-subscribing the same device updates in place and
+   *  re-points it at the current owner. Scoped to the owner. */
+  async savePushSubscription(userId: string, sub: PushSubscriptionInput): Promise<void> {
+    if (sub.platform === 'web') {
+      if (!sub.endpoint) return;
+      await this.pool.query(
+        `INSERT INTO push_subscriptions (id, user_id, platform, endpoint, keys_p256dh, keys_auth, created_at)
+         VALUES ($1,$2,'web',$3,$4,$5,$6)
+         ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id,
+           keys_p256dh = EXCLUDED.keys_p256dh, keys_auth = EXCLUDED.keys_auth`,
+        [randomId('push'), userId, sub.endpoint, sub.keys?.p256dh ?? null, sub.keys?.auth ?? null, nowIso()],
+      );
+    } else {
+      if (!sub.expoToken) return;
+      await this.pool.query(
+        `INSERT INTO push_subscriptions (id, user_id, platform, expo_token, created_at)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (expo_token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform`,
+        [randomId('push'), userId, sub.platform, sub.expoToken, nowIso()],
+      );
+    }
+  }
+
+  async deletePushSubscription(userId: string, key: { endpoint?: string; expoToken?: string }): Promise<void> {
+    if (key.endpoint) {
+      await this.pool.query('DELETE FROM push_subscriptions WHERE user_id = $1 AND endpoint = $2', [userId, key.endpoint]);
+    } else if (key.expoToken) {
+      await this.pool.query('DELETE FROM push_subscriptions WHERE user_id = $1 AND expo_token = $2', [userId, key.expoToken]);
+    }
+  }
+
+  /** All push targets for a user (used by the notifier). Scoped to the owner. */
+  async getPushSubscriptions(userId: string): Promise<PushTarget[]> {
+    const res = await this.pool.query(
+      'SELECT platform, endpoint, keys_p256dh AS "p256dh", keys_auth AS "auth", expo_token AS "expoToken" FROM push_subscriptions WHERE user_id = $1',
+      [userId],
+    );
+    return res.rows as PushTarget[];
+  }
+
+  /** Remove a dead web subscription (server got 404/410 from the push service). */
+  async removePushEndpoint(endpoint: string): Promise<void> {
+    await this.pool.query('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
   }
 
   // --- apps / connections ---

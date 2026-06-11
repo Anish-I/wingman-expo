@@ -9,15 +9,25 @@ async function buildSystemPrompt(ctx: ToolContext): Promise<string> {
   const apps = await ctx.store.getApps(ctx.userId);
   const connected = apps.filter((a) => a.connected).map((a) => a.name).join(', ') || 'none';
   const missing = apps.filter((a) => !a.connected).map((a) => a.name).join(', ') || 'none';
-  return [
+  const lines = [
     "You are Pip, the Wingman assistant. Be warm, concise, and act on user requests by calling tools instead of explaining what you'd do.",
     "Prefer 1–2 sentence replies. Never hallucinate event details — read or create them through tools.",
     `Connected apps: ${connected}. Not yet connected: ${missing}.`,
     'If a tool returns connection_required, call create_app_connection({ app: <slug> }) and surface the resulting link to the user.',
-    'When the user shares a durable fact, preference, routine, or person, call the remember tool to save it. Use the memory below to personalize your replies.',
-    '',
-    await ctx.store.getMemoryContext(ctx.userId),
-  ].join('\n');
+  ];
+  // Memory toggle (Settings → Privacy → Memory) genuinely gates Pip's long-term
+  // memory. When off, we neither inject what we know nor invite the remember tool.
+  const { memoryEnabled } = await ctx.store.getSettings(ctx.userId);
+  if (memoryEnabled) {
+    lines.push(
+      'When the user shares a durable fact, preference, routine, or person, call the remember tool to save it. Use the memory below to personalize your replies.',
+      '',
+      await ctx.store.getMemoryContext(ctx.userId),
+    );
+  } else {
+    lines.push('Memory is turned OFF for this user — do not call the remember tool, and rely only on the current conversation.');
+  }
+  return lines.join('\n');
 }
 
 export type OrchestratorParams = {

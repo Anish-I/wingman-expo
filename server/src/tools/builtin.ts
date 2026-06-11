@@ -181,6 +181,11 @@ export const remember: ServerTool = {
     if (!note) {
       return { output: 'Nothing to remember — provide a note.' };
     }
+    // Respect the user's Memory toggle: when off, never write to long-term memory.
+    const { memoryEnabled } = await ctx.store.getSettings(ctx.userId);
+    if (!memoryEnabled) {
+      return { output: "Memory is turned off in Settings, so I won't save that. Turn Memory on if you'd like me to remember." };
+    }
     await ctx.store.appendDailyLog(ctx.userId, note);
     await ctx.store.addActivity(ctx.userId, {
       title: 'Remembered something',

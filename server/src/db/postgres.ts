@@ -115,6 +115,34 @@ CREATE TABLE IF NOT EXISTS memory_docs (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (user_id, slug)
 );
+
+-- Per-user preferences (the Settings screen). One row per user, created lazily
+-- on first read. memory_enabled actually gates Pip's long-term memory; push +
+-- quiet_hours govern notification delivery (see push_subscriptions).
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id        TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  push_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+  quiet_hours    TEXT NOT NULL DEFAULT '10pm - 7am',
+  memory_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at     TEXT NOT NULL
+);
+
+-- Real push targets. A web browser stores a Web Push subscription (endpoint +
+-- VAPID keys); a native build stores an Expo push token. A user can have several
+-- (phone + laptop). Unique endpoint/token so re-subscribing upserts in place.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  platform    TEXT NOT NULL,
+  endpoint    TEXT,
+  keys_p256dh TEXT,
+  keys_auth   TEXT,
+  expo_token  TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS push_sub_endpoint_idx ON push_subscriptions (endpoint) WHERE endpoint IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS push_sub_expo_idx ON push_subscriptions (expo_token) WHERE expo_token IS NOT NULL;
+CREATE INDEX IF NOT EXISTS push_sub_user_idx ON push_subscriptions (user_id);
 `;
 
 let pool: PgPool | null = null;

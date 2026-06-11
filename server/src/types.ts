@@ -11,6 +11,30 @@ export type AuthSession = {
   user: CurrentUser;
 };
 
+/** Per-user preferences (the Settings screen). */
+export type UserSettings = {
+  pushEnabled: boolean;
+  quietHours: string;
+  memoryEnabled: boolean;
+};
+
+/** A registration request from a client for push delivery. */
+export type PushSubscriptionInput = {
+  platform: 'web' | 'ios' | 'android';
+  endpoint?: string;
+  keys?: { p256dh?: string; auth?: string };
+  expoToken?: string;
+};
+
+/** A stored push target, as read back for the notifier. */
+export type PushTarget = {
+  platform: 'web' | 'ios' | 'android';
+  endpoint: string | null;
+  p256dh: string | null;
+  auth: string | null;
+  expoToken: string | null;
+};
+
 export type ActivityEvent = {
   id: string;
   when: string;
