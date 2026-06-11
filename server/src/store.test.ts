@@ -22,6 +22,24 @@ test('createAccount + signIn issues a working session', { skip }, async () => {
   assert.ok(signedIn.ok && signedIn.token.length > 0);
 });
 
+test('upsertUser creates then updates (Supabase-auth path)', { skip }, async () => {
+  const store = await freshStore();
+  const id = `sb-${rid()}`;
+  const email = `sb-${rid()}@example.com`;
+  const first = await store.upsertUser({ id, email, name: 'First Name' });
+  assert.equal(first.created, true);
+  assert.equal(first.user.id, id);
+  assert.equal(first.user.email, email);
+
+  // Same id again -> update, not create; name/email can change.
+  const second = await store.upsertUser({ id, email, name: 'Renamed' });
+  assert.equal(second.created, false);
+  assert.equal(second.user.name, 'Renamed');
+
+  const fetched = await store.getUserById(id);
+  assert.equal(fetched?.name, 'Renamed');
+});
+
 test('sessions resolve back to the user', { skip }, async () => {
   const store = await freshStore();
   const email = `Case-${rid()}@Example.com`;

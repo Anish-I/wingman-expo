@@ -88,14 +88,24 @@ function toCurrentUser(row: UserRow): CurrentUser {
 export class PgStore {
   private constructor(readonly pool: PgPool) {}
 
-  /** Open the pool, ensure schema + demo seed. Pass a Supabase connection string. */
-  static async open(connectionString: string | undefined = process.env.DATABASE_URL): Promise<PgStore> {
+  /**
+   * Open the pool, ensure schema, and (optionally) seed the legacy demo account.
+   * Pass `seedDemoAccount: false` when Supabase Auth owns identity — the legacy
+   * `user-sam` row (scrypt) would otherwise collide on email with the Supabase
+   * demo user; demo content is seeded on first login instead (see userFromIdentity).
+   */
+  static async open(
+    connectionString: string | undefined = process.env.DATABASE_URL,
+    opts: { seedDemoAccount?: boolean } = {},
+  ): Promise<PgStore> {
     if (!connectionString) {
       throw new Error('DATABASE_URL is required (Supabase Postgres connection string).');
     }
     const pool = await openPg(connectionString);
     const store = new PgStore(pool);
-    await store.seedDemoAccount();
+    if (opts.seedDemoAccount ?? true) {
+      await store.seedDemoAccount();
+    }
     return store;
   }
 
@@ -121,7 +131,16 @@ export class PgStore {
     // NOTE: we intentionally do NOT pre-mark any apps connected. "Connected"
     // must mean a real OAuth connection (Composio is the source of truth);
     // faking it here made the Apps screen lie. Users connect apps via OAuth.
+    await this.seedDemoContent(id);
+  }
 
+  /**
+   * Seed sample flows + calendar events for a user. Used both by the legacy
+   * demo seed and (under Supabase Auth) when the demo account first signs in,
+   * so the demo experience has content regardless of the user id. Idempotent-ish:
+   * only call for a freshly created user.
+   */
+  async seedDemoContent(userId: string): Promise<void> {
     const seedFlows: Array<Omit<Flow, 'id'>> = [
       { emoji: '📆', title: 'Calendar brief', description: "Tomorrow's meetings every night", trigger: 'Nightly 9:30 PM', runs: 12, color: '#F5BC1E', active: true, appSlug: 'googlecalendar' },
       { emoji: '💬', title: 'Standup nudge', description: 'Morning reminder before your first meeting', trigger: 'Weekdays 9:00 AM', runs: 5, color: '#8B7CF6', active: false, appSlug: 'googlecalendar' },
@@ -129,7 +148,7 @@ export class PgStore {
     for (const f of seedFlows) {
       await this.pool.query(
         'INSERT INTO flows (id, user_id, emoji, title, description, trigger, runs, color, active, app_slug, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
-        [randomId('flow'), id, f.emoji, f.title, f.description, f.trigger, f.runs, f.color, f.active, f.appSlug, nowIso()],
+        [randomId('flow'), userId, f.emoji, f.title, f.description, f.trigger, f.runs, f.color, f.active, f.appSlug, nowIso()],
       );
     }
 
@@ -146,7 +165,7 @@ export class PgStore {
     for (const e of seedEvents) {
       await this.pool.query(
         'INSERT INTO calendar_events (id, user_id, title, start_iso, end_iso, subtitle, emoji, color) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
-        [randomId('event'), id, e.title, e.start, e.end, e.subtitle, e.emoji, e.color],
+        [randomId('event'), userId, e.title, e.start, e.end, e.subtitle, e.emoji, e.color],
       );
     }
   }
@@ -165,6 +184,29 @@ export class PgStore {
     const res = await this.pool.query('SELECT id, name, email, phone, tier FROM users WHERE lower(email) = lower($1)', [email]);
     const row = res.rows[0] as UserRow | undefined;
     return row ? toCurrentUser(row) : null;
+  }
+
+  async getUserById(id: string): Promise<CurrentUser | null> {
+    const res = await this.pool.query('SELECT id, name, email, phone, tier FROM users WHERE id = $1', [id]);
+    const row = res.rows[0] as UserRow | undefined;
+    return row ? toCurrentUser(row) : null;
+  }
+
+  /**
+   * Map a Supabase-authenticated identity onto our `users` row (id = Supabase
+   * uid). Passwords live in Supabase Auth, so password_hash is empty here.
+   * Returns whether the row was newly created (so callers can seed demo content).
+   */
+  async upsertUser(input: { id: string; email: string; name: string }): Promise<{ user: CurrentUser; created: boolean }> {
+    const res = await this.pool.query(
+      `INSERT INTO users (id, name, email, password_hash, phone, tier, created_at)
+       VALUES ($1,$2,$3,'',$4,$5,$6)
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email
+       RETURNING id, name, email, phone, tier, (xmax = 0) AS inserted`,
+      [input.id, input.name, input.email, '+1 (555) 000-0000', 'Pro', nowIso()],
+    );
+    const row = res.rows[0] as UserRow & { inserted: boolean };
+    return { user: toCurrentUser(row), created: row.inserted };
   }
 
   async getUserBySession(token: string): Promise<CurrentUser | null> {

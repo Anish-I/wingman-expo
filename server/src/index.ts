@@ -6,6 +6,7 @@ import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
 
 import { PgStore } from './store.js';
+import { createSupabaseAuth, type AuthedIdentity } from './auth/supabase.js';
 import { buildUiCritique } from './ui-critique.js';
 import { pickProvider } from './llm/provider.js';
 import { createComposioRuntime } from './tools/composio.js';
@@ -32,18 +33,31 @@ const env = z.object({
   OPENAI_API_KEY: z.string().optional(),
   COMPOSIO_API_KEY: z.string().optional(),
   COMPOSIO_AUTH_CONFIGS: z.string().optional(),
+  SUPABASE_URL: z.string().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
 }).parse(process.env);
 
 // Public base URL of this API (used to build OAuth callback URLs the browser hits).
 const apiBaseUrl = env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`;
 
 const app = Fastify({ logger: true });
-const store = await PgStore.open(env.DATABASE_URL);
+// When Supabase Auth owns identity, skip the legacy demo-account seed (it would
+// collide on email with the Supabase demo user). createSupabaseAuth is created
+// below, but enablement is a pure env check, so compute it here.
+const supabaseAuthEnabled = Boolean(env.SUPABASE_URL && env.SUPABASE_ANON_KEY && env.SUPABASE_SERVICE_ROLE_KEY);
+const store = await PgStore.open(env.DATABASE_URL, { seedDemoAccount: !supabaseAuthEnabled });
 const llmProvider = pickProvider({
   LLM_PROVIDER: env.LLM_PROVIDER,
   LLM_MODEL: env.LLM_MODEL,
   OPENAI_API_KEY: env.OPENAI_API_KEY,
 });
+const supabaseAuth = createSupabaseAuth({
+  SUPABASE_URL: env.SUPABASE_URL,
+  SUPABASE_ANON_KEY: env.SUPABASE_ANON_KEY,
+  SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY,
+});
+const DEMO_EMAIL = 'sam@wingman.dev';
 const composioRuntime = createComposioRuntime({
   COMPOSIO_API_KEY: env.COMPOSIO_API_KEY,
   COMPOSIO_AUTH_CONFIGS: env.COMPOSIO_AUTH_CONFIGS,
@@ -113,10 +127,38 @@ function authHeaderToken(header?: string) {
   return header.slice('Bearer '.length);
 }
 
+// Map a verified Supabase identity onto our users row. First sight upserts and,
+// for the demo account, seeds sample content so the demo has flows/events.
+async function userFromIdentity(identity: AuthedIdentity) {
+  const existing = await store.getUserById(identity.id);
+  if (existing) return existing;
+  const { user, created } = await store.upsertUser(identity);
+  if (created && identity.email.toLowerCase() === DEMO_EMAIL) {
+    await store.seedDemoContent(user.id);
+  }
+  return user;
+}
+
+// Short-lived cache so we don't call Supabase to verify the JWT on every request.
+const tokenCache = new Map<string, { identity: AuthedIdentity; at: number }>();
+const TOKEN_CACHE_MS = 60_000;
+
 async function getAuthedUser(request: { headers: Record<string, unknown> }) {
   const token = authHeaderToken(String(request.headers.authorization ?? ''));
   if (!token) {
     return null;
+  }
+  if (supabaseAuth.enabled) {
+    const cached = tokenCache.get(token);
+    let identity: AuthedIdentity | null;
+    if (cached && Date.now() - cached.at < TOKEN_CACHE_MS) {
+      identity = cached.identity;
+    } else {
+      identity = await supabaseAuth.verifyToken(token);
+      if (identity) tokenCache.set(token, { identity, at: Date.now() });
+    }
+    if (!identity) return null;
+    return userFromIdentity(identity);
   }
   return store.getUserBySession(token);
 }
@@ -176,10 +218,23 @@ app.get('/health', async () => ({
   ok: true,
   provider: llmProvider.id,
   composio: composioRuntime.enabled,
+  auth: supabaseAuth.enabled ? 'supabase' : 'legacy',
 }));
 
 app.post('/auth/demo/create', async (request, reply) => {
   const payload = createPayloadSchema.parse(request.body);
+  if (supabaseAuth.enabled) {
+    const created = await supabaseAuth.signUp(payload.name, payload.email, payload.password);
+    if (!created.ok) {
+      return reply.status(400).send({ error: created.error });
+    }
+    const signedIn = await supabaseAuth.signIn(payload.email, payload.password);
+    if (!signedIn.ok) {
+      return reply.status(400).send({ error: signedIn.error });
+    }
+    const user = await userFromIdentity(signedIn.identity);
+    return reply.status(201).send(serializeAuth(user, signedIn.token));
+  }
   const result = await store.createAccount(payload);
   if (!result.ok) {
     return reply.status(400).send({ error: result.error });
@@ -190,6 +245,14 @@ app.post('/auth/demo/create', async (request, reply) => {
 
 app.post('/auth/demo/login', async (request, reply) => {
   const payload = authPayloadSchema.parse(request.body);
+  if (supabaseAuth.enabled) {
+    const signedIn = await supabaseAuth.signIn(payload.email, payload.password);
+    if (!signedIn.ok) {
+      return reply.status(401).send({ error: signedIn.error });
+    }
+    const user = await userFromIdentity(signedIn.identity);
+    return reply.send(serializeAuth(user, signedIn.token));
+  }
   const result = await store.signIn(payload.email, payload.password);
   if (!result.ok) {
     return reply.status(401).send({ error: result.error });
@@ -362,6 +425,9 @@ app.delete('/me', async (request, reply) => {
   }
   await store.deleteAccount(user.id);
   await store.clearHistory(user.id);
+  if (supabaseAuth.enabled) {
+    await supabaseAuth.deleteUser(user.id);
+  }
   return reply.status(204).send();
 });
 
