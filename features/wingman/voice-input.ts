@@ -1,34 +1,41 @@
 import React from 'react';
 import { Platform } from 'react-native';
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from 'expo-speech-recognition';
 
-// The project's tsconfig doesn't pull in the DOM lib, so the browser speech APIs
-// aren't typed. Cast through `any` at the boundary (same pattern as push-web.ts).
-type AnyGlobal = any;
+// expo-speech-recognition gives one API across web (Web Speech API), iOS
+// (SFSpeechRecognizer) and Android (SpeechRecognizer). On native it needs a
+// dev-client / standalone build because it ships native code — it will not work
+// in Expo Go. The config plugin in app.json injects the mic + speech permission
+// strings the OS requires.
 
-type SpeechRecognitionLike = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start(): void;
-  stop(): void;
-  abort(): void;
-  onresult: ((event: AnyGlobal) => void) | null;
-  onerror: ((event: AnyGlobal) => void) | null;
-  onend: (() => void) | null;
+type AnyEvent = {
+  results?: { transcript?: string }[];
+  isFinal?: boolean;
+  error?: string;
+  message?: string;
 };
 
-function getRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
-  if (Platform.OS !== 'web') return null;
-  const w = globalThis as AnyGlobal;
-  return w?.SpeechRecognition ?? w?.webkitSpeechRecognition ?? null;
+function detectLang(): string {
+  if (Platform.OS === 'web') {
+    const nav = (globalThis as { navigator?: { language?: string } }).navigator;
+    if (nav?.language) return nav.language;
+  }
+  return 'en-US';
 }
 
 export function isVoiceInputSupported(): boolean {
-  return getRecognitionCtor() != null;
+  try {
+    return ExpoSpeechRecognitionModule.isRecognitionAvailable();
+  } catch {
+    return false;
+  }
 }
 
 export type VoiceDictation = {
-  /** Whether this platform/browser can do speech-to-text at all. */
+  /** Whether this platform/device can do speech-to-text at all. */
   supported: boolean;
   /** True while the mic is actively listening. */
   listening: boolean;
@@ -41,110 +48,109 @@ export type VoiceDictation = {
 };
 
 /**
- * Browser voice dictation for the chat composer. While listening, partial and
- * final transcripts are streamed to `onText`, which receives the full text the
- * composer should show (the snapshot of whatever was already typed plus the
- * speech so far). On native this returns `supported: false` and no-ops.
+ * Voice dictation for the chat composer, backed by expo-speech-recognition.
+ * While listening, partial and final transcripts are streamed to `onText`,
+ * which receives the full text the composer should show (whatever was already
+ * typed plus the speech so far). Works on web, iOS and Android with the same
+ * interface.
  */
 export function useVoiceDictation(
   getBaseText: () => string,
   onText: (text: string) => void,
 ): VoiceDictation {
-  const supported = React.useMemo(isVoiceInputSupported, []);
+  const [supported, setSupported] = React.useState(false);
   const [listening, setListening] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null);
+
+  // Snapshot of the draft when dictation started, so speech appends instead of
+  // wiping what the user already typed.
   const baseTextRef = React.useRef('');
   const onTextRef = React.useRef(onText);
   const getBaseTextRef = React.useRef(getBaseText);
   onTextRef.current = onText;
   getBaseTextRef.current = getBaseText;
 
-  const stop = React.useCallback(() => {
-    const rec = recognitionRef.current;
-    if (rec) {
-      try {
-        rec.stop();
-      } catch {
-        // already stopped
-      }
-    }
-    setListening(false);
+  React.useEffect(() => {
+    setSupported(isVoiceInputSupported());
   }, []);
 
-  const start = React.useCallback(() => {
-    const Ctor = getRecognitionCtor();
-    if (!Ctor) return;
+  useSpeechRecognitionEvent('start', () => setListening(true));
+
+  useSpeechRecognitionEvent('result', (event: AnyEvent) => {
+    const transcript = event.results?.[0]?.transcript ?? '';
+    const base = baseTextRef.current;
+    const merged = base ? `${base} ${transcript.trim()}` : transcript.trimStart();
+    onTextRef.current(merged);
+  });
+
+  useSpeechRecognitionEvent('error', (event: AnyEvent) => {
+    const code = event?.error;
+    if (code === 'not-allowed' || code === 'service-not-allowed') {
+      setError('Microphone permission denied. Allow mic access in settings.');
+    } else if (code === 'no-speech') {
+      setError(null); // benign — user just didn't say anything
+    } else if (code === 'audio-capture') {
+      setError('No microphone found.');
+    } else if (code && code !== 'aborted') {
+      setError('Voice input failed. Try again.');
+    }
+    setListening(false);
+  });
+
+  useSpeechRecognitionEvent('end', () => setListening(false));
+
+  const start = React.useCallback(async () => {
     setError(null);
+    baseTextRef.current = getBaseTextRef.current().trim();
 
-    // Snapshot what's already in the box so dictation appends rather than wipes.
-    const base = getBaseTextRef.current().trim();
-    baseTextRef.current = base;
-
-    const rec = new Ctor();
-    rec.lang =
-      (Platform.OS === 'web' && (globalThis as AnyGlobal)?.navigator?.language) || 'en-US';
-    rec.continuous = false;
-    rec.interimResults = true;
-
-    rec.onresult = (event: AnyGlobal) => {
-      let transcript = '';
-      for (let i = 0; i < event.results.length; i += 1) {
-        transcript += event.results[i][0].transcript;
-      }
-      const merged = baseTextRef.current
-        ? `${baseTextRef.current} ${transcript.trim()}`
-        : transcript.trimStart();
-      onTextRef.current(merged);
-    };
-
-    rec.onerror = (event: AnyGlobal) => {
-      const code = event?.error as string | undefined;
-      if (code === 'not-allowed' || code === 'service-not-allowed') {
-        setError('Microphone permission denied. Allow mic access in your browser.');
-      } else if (code === 'no-speech') {
-        setError(null); // benign — user just didn't say anything
-      } else if (code === 'audio-capture') {
-        setError('No microphone found.');
-      } else if (code && code !== 'aborted') {
-        setError('Voice input failed. Try again.');
-      }
-      setListening(false);
-    };
-
-    rec.onend = () => {
-      setListening(false);
-      recognitionRef.current = null;
-    };
-
-    recognitionRef.current = rec;
     try {
-      rec.start();
+      // Web prompts for mic access on start(); native needs an explicit request.
+      if (Platform.OS !== 'web') {
+        const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+        if (!perm.granted) {
+          setError('Microphone permission denied. Allow mic access in settings.');
+          return;
+        }
+      }
+      ExpoSpeechRecognitionModule.start({
+        lang: detectLang(),
+        interimResults: true,
+        continuous: false,
+        maxAlternatives: 1,
+      });
+      // 'start' event will flip `listening`, but set it eagerly so the UI reacts
+      // immediately even if the event is briefly delayed.
       setListening(true);
     } catch {
-      // start() throws if called while already running — ignore.
+      setError('Voice input failed. Try again.');
       setListening(false);
     }
+  }, []);
+
+  const stop = React.useCallback(() => {
+    try {
+      ExpoSpeechRecognitionModule.stop();
+    } catch {
+      // already stopped
+    }
+    setListening(false);
   }, []);
 
   const toggle = React.useCallback(() => {
     if (listening) {
       stop();
     } else {
-      start();
+      void start();
     }
   }, [listening, start, stop]);
 
-  // Clean up if the component unmounts mid-listen.
+  // Abort any in-flight recognition if the component unmounts mid-listen.
   React.useEffect(() => {
     return () => {
-      const rec = recognitionRef.current;
-      if (rec) {
-        try {
-          rec.abort();
-        } catch {
-          // ignore
-        }
+      try {
+        ExpoSpeechRecognitionModule.abort();
+      } catch {
+        // ignore
       }
     };
   }, []);

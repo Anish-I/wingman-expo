@@ -605,7 +605,7 @@ export function ChatScreen() {
               }
               Alert.alert(
                 'Voice input',
-                'Voice dictation is available in the web app (Chrome, Edge, or Safari). On this device, type your message instead.',
+                "Speech recognition isn't available on this device. Make sure the system speech/voice service is enabled, or type your message instead.",
               );
             }}
             accessibilityLabel={

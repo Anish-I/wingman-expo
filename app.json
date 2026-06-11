@@ -34,7 +34,15 @@
       "expo-dev-client",
       "expo-router",
       "expo-web-browser",
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Wingman uses the microphone for voice dictation in chat.",
+          "speechRecognitionPermission": "Wingman uses speech recognition to turn your voice into text.",
+          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
