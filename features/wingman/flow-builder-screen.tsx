@@ -33,7 +33,7 @@ import {
 // runner validates saved steps against these tool names, so this list is the
 // single source of truth for "what a flow can do".
 
-type StepArgField = { name: string; label: string; placeholder: string };
+type StepArgField = { name: string; label: string; placeholder: string; optional?: boolean; multiline?: boolean };
 
 type StepCatalogItem = {
   key: string;
@@ -42,7 +42,7 @@ type StepCatalogItem = {
   description: string;
   tool: string;
   defaultArgs: Record<string, unknown>;
-  arg?: StepArgField;
+  fields?: StepArgField[];
 };
 
 const STEP_CATALOG: StepCatalogItem[] = [
@@ -77,7 +77,50 @@ const STEP_CATALOG: StepCatalogItem[] = [
     description: 'Add an event from a description',
     tool: 'calendar_create_event',
     defaultArgs: { intent: '' },
-    arg: { name: 'intent', label: 'What to schedule', placeholder: 'lunch with Mara tomorrow at noon' },
+    fields: [{ name: 'intent', label: 'What to schedule', placeholder: 'lunch with Mara tomorrow at noon' }],
+  },
+  {
+    key: 'gmail-send',
+    label: 'Send an email',
+    emoji: '📧',
+    description: 'Send an email through Gmail',
+    tool: 'gmail_send_email',
+    defaultArgs: { to: '', subject: '', body: '' },
+    fields: [
+      { name: 'to', label: 'To', placeholder: 'mara@example.com' },
+      { name: 'subject', label: 'Subject', placeholder: 'Quick update', optional: true },
+      { name: 'body', label: 'Message', placeholder: 'Hi Mara, just wanted to…', multiline: true },
+    ],
+  },
+  {
+    key: 'gmail-inbox',
+    label: 'Summarize my inbox',
+    emoji: '📥',
+    description: 'Pull recent unread emails',
+    tool: 'gmail_summarize_inbox',
+    defaultArgs: { query: '' },
+    fields: [{ name: 'query', label: 'Gmail search (optional)', placeholder: 'is:unread', optional: true }],
+  },
+  {
+    key: 'slack-send',
+    label: 'Post to Slack',
+    emoji: '💬',
+    description: 'Send a message to a channel',
+    tool: 'slack_send_message',
+    defaultArgs: { channel: '', text: '' },
+    fields: [
+      { name: 'channel', label: 'Channel', placeholder: '#general' },
+      { name: 'text', label: 'Message', placeholder: 'Heads up team…', multiline: true },
+    ],
+  },
+  {
+    key: 'spotify-play',
+    label: 'Play on Spotify',
+    emoji: '🎵',
+    description: 'Start a track or playlist',
+    tool: 'spotify_play',
+    defaultArgs: { query: '' },
+    fields: [{ name: 'query', label: 'What to play', placeholder: 'Lo-fi focus playlist' }],
   },
   {
     key: 'remember',
@@ -86,7 +129,7 @@ const STEP_CATALOG: StepCatalogItem[] = [
     description: 'Save a fact to long-term memory',
     tool: 'remember',
     defaultArgs: { note: '' },
-    arg: { name: 'note', label: 'Note to remember', placeholder: 'Standup is at 9am' },
+    fields: [{ name: 'note', label: 'Note to remember', placeholder: 'Standup is at 9am' }],
   },
 ];
 
@@ -380,22 +423,30 @@ function StepCard({
         </View>
       </View>
 
-      {item.arg ? (
-        <View style={{ gap: 6 }}>
-          <Text style={{ color: colors.fgSecondary, fontFamily: wingmanFonts.text, fontSize: 11, fontWeight: '800' }}>
-            {item.arg.label}
-          </Text>
-          <TextInput
-            value={typeof step.args[item.arg.name] === 'string' ? (step.args[item.arg.name] as string) : ''}
-            onChangeText={(value) => onChangeArg(step.id, item.arg!.name, value)}
-            placeholder={item.arg.placeholder}
-            placeholderTextColor={colors.fgMuted}
-            style={{
-              minHeight: 42, borderRadius: 12, borderWidth: 1.5, borderColor: colors.border,
-              backgroundColor: colors.bg, paddingHorizontal: 12, color: colors.ink,
-              fontFamily: wingmanFonts.text, fontSize: 13, fontWeight: '600',
-            }}
-          />
+      {item.fields?.length ? (
+        <View style={{ gap: 10 }}>
+          {item.fields.map((field) => (
+            <View key={field.name} style={{ gap: 6 }}>
+              <Text style={{ color: colors.fgSecondary, fontFamily: wingmanFonts.text, fontSize: 11, fontWeight: '800' }}>
+                {field.label}
+                {field.optional ? <Text style={{ color: colors.fgMuted, fontWeight: '600' }}>  ·  optional</Text> : null}
+              </Text>
+              <TextInput
+                value={typeof step.args[field.name] === 'string' ? (step.args[field.name] as string) : ''}
+                onChangeText={(value) => onChangeArg(step.id, field.name, value)}
+                placeholder={field.placeholder}
+                placeholderTextColor={colors.fgMuted}
+                multiline={field.multiline}
+                style={{
+                  minHeight: field.multiline ? 72 : 42, borderRadius: 12, borderWidth: 1.5, borderColor: colors.border,
+                  backgroundColor: colors.bg, paddingHorizontal: 12,
+                  paddingTop: field.multiline ? 10 : 0, color: colors.ink,
+                  textAlignVertical: field.multiline ? 'top' : 'center',
+                  fontFamily: wingmanFonts.text, fontSize: 13, fontWeight: '600',
+                }}
+              />
+            </View>
+          ))}
         </View>
       ) : null}
     </View>
@@ -426,25 +477,27 @@ function AddStepSheet({
           <Text style={{ color: colors.ink, fontFamily: wingmanFonts.display, fontSize: 18, fontWeight: '700', paddingHorizontal: 4 }}>
             Add a step
           </Text>
-          {STEP_CATALOG.map((item) => (
-            <Pressable
-              key={item.key}
-              onPress={() => onPick(item)}
-              style={({ pressed }) => ({
-                flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14,
-                backgroundColor: pressed ? colors.cardAlt : 'transparent',
-                borderWidth: 1.5, borderColor: colors.border, borderCurve: 'continuous',
-              })}>
-              <View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: withAlpha(colors.lav500, 0.14), alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontSize: 18 }}>{item.emoji}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.ink, fontFamily: wingmanFonts.text, fontSize: 14, fontWeight: '700' }}>{item.label}</Text>
-                <Text style={{ color: colors.fgMuted, fontFamily: wingmanFonts.text, fontSize: 12, fontWeight: '600' }}>{item.description}</Text>
-              </View>
-              <IconGlyph name="plus" color={colors.sky500} size={18} />
-            </Pressable>
-          ))}
+          <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 8 }} showsVerticalScrollIndicator={false}>
+            {STEP_CATALOG.map((item) => (
+              <Pressable
+                key={item.key}
+                onPress={() => onPick(item)}
+                style={({ pressed }) => ({
+                  flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14,
+                  backgroundColor: pressed ? colors.cardAlt : 'transparent',
+                  borderWidth: 1.5, borderColor: colors.border, borderCurve: 'continuous',
+                })}>
+                <View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: withAlpha(colors.lav500, 0.14), alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 18 }}>{item.emoji}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: colors.ink, fontFamily: wingmanFonts.text, fontSize: 14, fontWeight: '700' }}>{item.label}</Text>
+                  <Text style={{ color: colors.fgMuted, fontFamily: wingmanFonts.text, fontSize: 12, fontWeight: '600' }}>{item.description}</Text>
+                </View>
+                <IconGlyph name="plus" color={colors.sky500} size={18} />
+              </Pressable>
+            ))}
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
@@ -581,14 +634,18 @@ export function FlowBuilderScreen() {
     setSteps((current) => current.filter((step) => step.id !== id));
   }, [markDirty]);
 
-  // A step that needs a text arg but has none isn't runnable — guard saving/testing.
-  const incompleteStep = React.useMemo(
-    () => steps.find((step) => {
+  // A step with an empty required field isn't runnable — guard saving/testing.
+  // Returns the offending step plus which field is missing for a precise message.
+  const incompleteStep = React.useMemo(() => {
+    for (const step of steps) {
       const item = catalogForStep(step);
-      return item.arg && !String(step.args[item.arg.name] ?? '').trim();
-    }),
-    [steps],
-  );
+      const missing = item.fields?.find(
+        (field) => !field.optional && !String(step.args[field.name] ?? '').trim(),
+      );
+      if (missing) return { step, item, field: missing };
+    }
+    return null;
+  }, [steps]);
 
   const persist = React.useCallback(async (): Promise<boolean> => {
     const cleanTitle = title.trim() || 'New workflow';
@@ -603,8 +660,7 @@ export function FlowBuilderScreen() {
   const handleSave = React.useCallback(async () => {
     if (saving) return;
     if (incompleteStep) {
-      const item = catalogForStep(incompleteStep);
-      setStatus({ tone: 'error', text: `Fill in "${item.arg?.label}" for ${item.label}.` });
+      setStatus({ tone: 'error', text: `Fill in "${incompleteStep.field.label}" for ${incompleteStep.item.label}.` });
       return;
     }
     setSaving(true);
@@ -630,8 +686,7 @@ export function FlowBuilderScreen() {
       return;
     }
     if (incompleteStep) {
-      const item = catalogForStep(incompleteStep);
-      setStatus({ tone: 'error', text: `Fill in "${item.arg?.label}" for ${item.label}.` });
+      setStatus({ tone: 'error', text: `Fill in "${incompleteStep.field.label}" for ${incompleteStep.item.label}.` });
       return;
     }
     setRunning(true);

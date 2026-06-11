@@ -476,7 +476,7 @@ app.post('/chat/stream', async (request, reply) => {
   }
   const payload = chatPayloadSchema.parse(request.body);
   const writer = openSSE(reply);
-  const ctx = { userId: user.id, store };
+  const ctx = { userId: user.id, store, composio: composioRuntime };
   const registry = await buildRegistry({ ctx, composio: composioRuntime, message: payload.message });
   await runChatTurn({
     provider: llmProvider,
@@ -496,7 +496,7 @@ app.post('/chat', async (request, reply) => {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   const payload = chatPayloadSchema.parse(request.body);
-  const ctx = { userId: user.id, store };
+  const ctx = { userId: user.id, store, composio: composioRuntime };
   const registry = await buildRegistry({ ctx, composio: composioRuntime, message: payload.message });
   let assembled = '';
   let connectionRequired: { appSlug: string; oauthUrl?: string | null } | null = null;
@@ -670,7 +670,7 @@ app.post('/flows/:id/run', async (request, reply) => {
   if (!flow || !flow.definition || flow.definition.steps.length === 0) {
     return reply.status(404).send({ error: 'Flow not found or has no runnable steps.' });
   }
-  const ctx = { userId: user.id, store };
+  const ctx = { userId: user.id, store, composio: composioRuntime };
   const registry = await buildRegistry({ ctx, composio: composioRuntime });
   const result = await runFlowDefinition(flow.definition, registry, ctx);
   await store.recordFlowRun(flow.id, user.id, new Date().toISOString());

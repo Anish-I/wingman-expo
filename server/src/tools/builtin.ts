@@ -1,4 +1,5 @@
 import type { ServerTool, ToolContext, ToolResult } from './types.js';
+import { composioActionTools } from './composio-actions.js';
 
 function fmtTime(iso: string): string {
   return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
@@ -203,4 +204,6 @@ export const builtinTools: Record<string, ServerTool> = {
   [briefingToday.definition.name]: briefingToday,
   [createAppConnection.definition.name]: createAppConnection,
   [remember.definition.name]: remember,
+  // Real Gmail / Slack / Spotify actions, exposed as flow step modules.
+  ...composioActionTools,
 };

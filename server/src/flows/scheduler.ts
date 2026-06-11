@@ -54,7 +54,7 @@ export async function runDueFlows(
     // Already ran this minute? skip (idempotent within the tick window).
     if (flow.lastRunAt && sameMinute(flow.lastRunAt, now)) continue;
 
-    const ctx = { userId: flow.userId, store };
+    const ctx = { userId: flow.userId, store, composio };
     try {
       const registry = await buildRegistry({ ctx, composio });
       const result = await runFlowDefinition(def, registry, ctx);
