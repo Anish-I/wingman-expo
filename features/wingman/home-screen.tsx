@@ -10,6 +10,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useWingman } from '@/features/wingman/provider';
 import {
   IconGlyph,
+  StateNotice,
   StickerCard,
   WingmanLabel,
 } from '@/features/wingman/primitives';
@@ -55,40 +56,13 @@ const shortcuts = [
 export function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { briefing, colors, connectedAppsCount, currentUser } = useWingman();
+  const { apps, briefing, colors, connectedAppsCount, currentUser, dataError, dataLoading, refreshData } = useWingman();
   const formattedDate = new Date().toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
   });
-  const briefingItems = briefing?.items.length
-    ? briefing.items
-    : [
-        {
-          id: 'fallback-brief-1',
-          time: '8:30',
-          title: 'Inbox triage ready',
-          subtitle: 'Pip can summarize priority messages.',
-          emoji: '📥',
-          color: colors.sky500,
-        },
-        {
-          id: 'fallback-brief-2',
-          time: '9:00',
-          title: 'Calendar scan',
-          subtitle: 'No conflicts found for your morning.',
-          emoji: '📅',
-          color: colors.sun500,
-        },
-        {
-          id: 'fallback-brief-3',
-          time: 'Now',
-          title: 'Workflow ideas',
-          subtitle: 'Try a digest, reminder, or PR notifier.',
-          emoji: '⚡',
-          color: colors.lav500,
-        },
-      ];
-  const greetingName = currentUser?.name.split(' ')[0] ?? 'Sam';
+  const briefingItems = briefing?.items ?? [];
+  const greetingName = currentUser?.name?.split(' ')[0] ?? 'there';
   const shortcutInk = '#1B2240';
 
   const openChat = async (prompt?: string) => {
@@ -324,7 +298,7 @@ export function HomeScreen() {
                 fontSize: 13,
                 fontWeight: '600',
               }}>
-              {connectedAppsCount} connected, 1,000+ available
+              {connectedAppsCount} connected, {apps.length} available
             </Text>
           </View>
           <IconGlyph name="chevron-right" color={colors.fgMuted} size={18} />
@@ -334,6 +308,25 @@ export function HomeScreen() {
 
       <View style={{ gap: 10 }}>
         <WingmanLabel>Today&apos;s brief</WingmanLabel>
+        {briefingItems.length === 0 ? (
+          dataError ? (
+            <StateNotice
+              tone="error"
+              title="Couldn't load your brief"
+              body={dataError}
+              actionLabel="Try again"
+              onAction={() => void refreshData()}
+            />
+          ) : dataLoading ? (
+            <StateNotice tone="loading" title="Putting your brief together…" />
+          ) : (
+            <StateNotice
+              pip="happy"
+              title="Nothing scheduled"
+              body="No calendar events for today. Connect Calendar or ask Pip to plan something."
+            />
+          )
+        ) : null}
         <View style={{ gap: 10 }}>
           {briefingItems.map((item, index) => (
             <Animated.View

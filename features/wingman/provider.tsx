@@ -11,6 +11,7 @@ import {
   fetchActivity,
   fetchApps,
   fetchBriefing,
+  fetchChatHistory,
   fetchFlow,
   fetchFlows,
   fetchMe,
@@ -27,7 +28,6 @@ import {
   type AuthStage,
   type Briefing,
   type CurrentUser,
-  type DemoAuthCredentials,
   type FlowDetail,
   type FlowItem,
   type FlowRunResult,
@@ -35,11 +35,6 @@ import {
   type UiCritiqueReport,
   type ActivityEvent,
   type ChatMessage,
-  appLibrary,
-  describeSchedule,
-  initialEvents,
-  initialFlows,
-  initialMessages,
 } from '@/features/wingman/data';
 import {
   type ResolvedTheme,
@@ -67,7 +62,8 @@ type WingmanContextValue = {
   colors: WingmanColors;
   currentUser: CurrentUser | null;
   session: AuthSession | null;
-  fakeAccount: Required<DemoAuthCredentials> & { name: string };
+  /** Seeded demo account credentials (a real backend account, used to prefill the sign-in form). */
+  demoAccount: { name: string; email: string; password: string };
   briefing: Briefing | null;
   apps: AppIntegration[];
   flows: FlowItem[];
@@ -76,10 +72,15 @@ type WingmanContextValue = {
   settings: WingmanSettings;
   connectedAppsCount: number;
   activeFlowsCount: number;
+  /** True while the first data load for the current session is in flight. */
+  dataLoading: boolean;
+  /** Non-null when the last data load failed (server unreachable, etc.). */
+  dataError: string | null;
   completeOnboarding: () => void;
-  signIn: () => Promise<void>;
+  signInWithDemoAccount: () => Promise<AuthResult>;
   signInWithPassword: (email: string, password: string) => Promise<AuthResult>;
-  createFakeAccount: (account: { name: string; email: string; password: string }) => Promise<AuthResult>;
+  createAccount: (account: { name: string; email: string; password: string }) => Promise<AuthResult>;
+  signOut: () => void;
   beginConnection: (appId: string) => Promise<void>;
   refreshData: () => Promise<void>;
   setThemeMode: (mode: ThemeMode) => void;
@@ -92,7 +93,6 @@ type WingmanContextValue = {
   setMemoryEnabled: (value: boolean) => void;
   setQuietHours: (value: string) => void;
   setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
-  sendChatMessage: (message: string) => Promise<AuthResult & { assistantMessage?: string }>;
   streamChatMessage: (message: string) => Promise<AuthResult>;
   clearChatThread: () => Promise<void>;
   deleteAccount: () => Promise<void>;
@@ -104,63 +104,14 @@ const WingmanContext = React.createContext<WingmanContextValue | null>(null);
 const AUTH_STAGE_KEY = 'wingman.auth-stage';
 const SESSION_KEY = 'wingman.session';
 
-const defaultFakeAccount = {
+// The seeded demo account is a REAL Supabase account (created by the server's
+// demo seed). Prefilling these into the sign-in form is a convenience, not fake
+// auth — sign-in still goes through the real backend and a wrong password fails.
+const demoAccount = {
   name: 'Sam Ortega',
   email: 'sam@wingman.dev',
   password: 'pigeon123',
 };
-
-function isLocalDemoToken(token: string) {
-  return token.startsWith('local-demo-token:');
-}
-
-function createLocalDemoSession(account: { name?: string; email: string }): AuthSession {
-  const email = account.email.trim().toLowerCase();
-  const name = account.name?.trim() || defaultFakeAccount.name;
-
-  return {
-    token: `local-demo-token:${Date.now()}`,
-    user: {
-      id: `local-demo:${email}`,
-      name,
-      email,
-      phone: '+1 (555) 123-4567',
-      tier: 'Pro',
-    },
-  };
-}
-
-const defaultBriefing: Briefing = {
-  greeting: 'Morning, Sam!',
-  chips: ['0 meetings', '0 flows running', '0 apps connected'],
-  items: [],
-};
-
-function createLocalDraftFlow(): FlowItem {
-  const createdAt = Date.now();
-
-  return {
-    id: `local-flow-${createdAt}`,
-    emoji: '✨',
-    title: 'New workflow',
-    description: 'Customize the trigger, apps, and actions',
-    trigger: 'Manual trigger',
-    runs: 0,
-    color: wingmanColors.light.sky500,
-    active: false,
-  };
-}
-
-function createLocalFlowActivity(flow: FlowItem): ActivityEvent {
-  return {
-    id: `local-activity-${Date.now()}`,
-    when: 'Just now',
-    title: 'Created flow',
-    subtitle: flow.title,
-    pip: 'clap',
-    color: flow.color,
-  };
-}
 
 const memoryStorage = new Map<string, string>();
 
@@ -211,12 +162,14 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
   const [themeMode, setThemeMode] = React.useState<ThemeMode>('light');
   const [session, setSession] = React.useState<AuthSession | null>(null);
   const [currentUser, setCurrentUser] = React.useState<CurrentUser | null>(null);
-  const [briefing, setBriefing] = React.useState<Briefing | null>(defaultBriefing);
-  const [apps, setApps] = React.useState<AppIntegration[]>(appLibrary);
-  const [flows, setFlows] = React.useState<FlowItem[]>(initialFlows);
-  const [events, setEvents] = React.useState<ActivityEvent[]>(initialEvents);
-  const [chatMessages, setChatMessages] = React.useState<ChatMessage[]>(initialMessages);
-  const [fakeAccount, setFakeAccount] = React.useState(defaultFakeAccount);
+  // No fake seed data — every list starts empty and is filled from the backend.
+  const [briefing, setBriefing] = React.useState<Briefing | null>(null);
+  const [apps, setApps] = React.useState<AppIntegration[]>([]);
+  const [flows, setFlows] = React.useState<FlowItem[]>([]);
+  const [events, setEvents] = React.useState<ActivityEvent[]>([]);
+  const [chatMessages, setChatMessages] = React.useState<ChatMessage[]>([]);
+  const [dataLoading, setDataLoading] = React.useState(false);
+  const [dataError, setDataError] = React.useState<string | null>(null);
   const [settings, setSettings] = React.useState<WingmanSettings>({
     pushEnabled: true,
     quietHours: '10pm - 7am',
@@ -250,28 +203,27 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     setHydrated(true);
   }, []);
 
-  const restoreDemoFallbackData = React.useCallback(() => {
-    setBriefing(defaultBriefing);
-    setApps(appLibrary);
-    setFlows(initialFlows);
-    setEvents(initialEvents);
+  const clearData = React.useCallback(() => {
+    setBriefing(null);
+    setApps([]);
+    setFlows([]);
+    setEvents([]);
+    setChatMessages([]);
+    setDataError(null);
   }, []);
 
   const clearSession = React.useCallback(() => {
     setSession(null);
     setCurrentUser(null);
-    restoreDemoFallbackData();
+    clearData();
     setAuthStage('sign-in');
-  }, [restoreDemoFallbackData]);
+  }, [clearData]);
 
   const refreshData = React.useCallback(async () => {
     if (!session?.token) {
       return;
     }
-    if (isLocalDemoToken(session.token)) {
-      restoreDemoFallbackData();
-      return;
-    }
+    setDataLoading(true);
     try {
       const [meResponse, appsResponse, flowsResponse, activityResponse, briefingResponse] = await Promise.all([
         fetchMe(session.token),
@@ -286,14 +238,18 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
       setFlows(flowsResponse.items);
       setEvents(activityResponse.items);
       setBriefing(briefingResponse);
+      setDataError(null);
     } catch (error) {
       if (error instanceof Error && error.message === 'Unauthorized') {
         clearSession();
         return;
       }
-      restoreDemoFallbackData();
+      // Honest failure: surface the error, do not invent data.
+      setDataError(error instanceof Error ? error.message : 'Could not reach the Wingman server.');
+    } finally {
+      setDataLoading(false);
     }
-  }, [clearSession, restoreDemoFallbackData, session?.token]);
+  }, [clearSession, session?.token]);
 
   React.useEffect(() => {
     writeLocalStorage(AUTH_STAGE_KEY, authStage);
@@ -306,79 +262,68 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (!session?.token) {
       setCurrentUser(null);
-      restoreDemoFallbackData();
+      clearData();
       return;
     }
-
     void refreshData();
-  }, [refreshData, restoreDemoFallbackData, session?.token]);
+  }, [clearData, refreshData, session?.token]);
+
+  // Load the persisted chat thread once per session establishment. Kept out of
+  // refreshData so a post-chat refresh never clobbers an in-progress reply.
+  React.useEffect(() => {
+    if (!session?.token) return;
+    const token = session.token;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { messages } = await fetchChatHistory(token);
+        if (!cancelled) setChatMessages(messages);
+      } catch {
+        // A history failure shouldn't block the app; the thread stays empty.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.token]);
 
   const persistSession = React.useCallback((nextSession: AuthSession) => {
     setSession(nextSession);
     setCurrentUser(nextSession.user);
     setAuthStage('authenticated');
-    setFakeAccount((current) => ({
-      ...current,
-      name: nextSession.user.name,
-      email: nextSession.user.email,
-    }));
   }, []);
 
-  const persistLocalDemoSession = React.useCallback((account: { name?: string; email: string }) => {
-    const localSession = createLocalDemoSession(account);
-    persistSession(localSession);
-    restoreDemoFallbackData();
-    return localSession;
-  }, [persistSession, restoreDemoFallbackData]);
-
-  const signIn = React.useCallback(async () => {
+  const signInWithDemoAccount = React.useCallback(async (): Promise<AuthResult> => {
     try {
-      const result = await demoLogin({
-        email: fakeAccount.email,
-        password: fakeAccount.password,
-      });
+      const result = await demoLogin({ email: demoAccount.email, password: demoAccount.password });
       persistSession(result.session);
-    } catch {
-      persistLocalDemoSession(fakeAccount);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Sign-in failed.' };
     }
-  }, [fakeAccount, persistLocalDemoSession, persistSession]);
+  }, [persistSession]);
 
-  const signInWithPassword = React.useCallback(async (email: string, password: string) => {
+  const signInWithPassword = React.useCallback(async (email: string, password: string): Promise<AuthResult> => {
     try {
       const result = await demoLogin({ email, password });
       persistSession(result.session);
-      return { ok: true } satisfies AuthResult;
-    } catch {
-      persistLocalDemoSession({ name: fakeAccount.name, email });
-      setFakeAccount((current) => ({
-        ...current,
-        email: email.trim().toLowerCase(),
-        password,
-      }));
-      return { ok: true } satisfies AuthResult;
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Sign-in failed.';
+      // Real auth: a wrong password (or any failure) is a real failure.
+      return { ok: false, error: message === 'Unauthorized' ? 'Wrong email or password.' : message };
     }
-  }, [fakeAccount.name, persistLocalDemoSession, persistSession]);
+  }, [persistSession]);
 
-  const createFakeAccount = React.useCallback(async (account: { name: string; email: string; password: string }) => {
+  const createAccount = React.useCallback(async (account: { name: string; email: string; password: string }): Promise<AuthResult> => {
     try {
       const result = await demoCreateAccount(account);
       persistSession(result.session);
-      setFakeAccount({
-        name: account.name,
-        email: account.email.trim().toLowerCase(),
-        password: account.password,
-      });
-      return { ok: true } satisfies AuthResult;
-    } catch {
-      persistLocalDemoSession(account);
-      setFakeAccount({
-        name: account.name,
-        email: account.email.trim().toLowerCase(),
-        password: account.password,
-      });
-      return { ok: true } satisfies AuthResult;
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Could not create the account.' };
     }
-  }, [persistLocalDemoSession, persistSession]);
+  }, [persistSession]);
 
   const beginConnection = React.useCallback(async (appId: string) => {
     if (!session?.token) {
@@ -398,12 +343,6 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     if (!session?.token) {
       return;
     }
-    if (isLocalDemoToken(session.token)) {
-      setFlows((currentFlows) => currentFlows.map((flow) => (
-        flow.id === id ? { ...flow, active: nextValue } : flow
-      )));
-      return;
-    }
     try {
       const response = await patchFlow(session.token, id, nextValue);
       setFlows((currentFlows) => currentFlows.map((flow) => (flow.id === id ? response.flow : flow)));
@@ -412,6 +351,8 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       if (error instanceof Error && error.message === 'Unauthorized') {
         clearSession();
+      } else {
+        throw error;
       }
     }
   }, [clearSession, session?.token]);
@@ -419,12 +360,6 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
   const createFlow = React.useCallback(async () => {
     if (!session?.token) {
       return null;
-    }
-    if (isLocalDemoToken(session.token)) {
-      const flow = createLocalDraftFlow();
-      setFlows((currentFlows) => [flow, ...currentFlows]);
-      setEvents((currentEvents) => [createLocalFlowActivity(flow), ...currentEvents]);
-      return flow;
     }
     try {
       const response = await createFlowRequest(session.token);
@@ -435,20 +370,14 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       if (error instanceof Error && error.message === 'Unauthorized') {
         clearSession();
-        return null;
       }
-      const flow = createLocalDraftFlow();
-      setFlows((currentFlows) => [flow, ...currentFlows]);
-      setEvents((currentEvents) => [createLocalFlowActivity(flow), ...currentEvents]);
-      return flow;
+      return null;
     }
   }, [clearSession, session?.token]);
 
   const getFlowDetail = React.useCallback(async (id: string): Promise<FlowDetail | null> => {
-    const localFlow = flows.find((flow) => flow.id === id);
-    const localDetail: FlowDetail | null = localFlow ? { ...localFlow, definition: null } : null;
-    if (!session?.token || isLocalDemoToken(session.token)) {
-      return localDetail;
+    if (!session?.token) {
+      return null;
     }
     try {
       const response = await fetchFlow(session.token, id);
@@ -456,34 +385,14 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       if (error instanceof Error && error.message === 'Unauthorized') {
         clearSession();
-        return null;
       }
-      return localDetail;
+      return null;
     }
-  }, [clearSession, flows, session?.token]);
+  }, [clearSession, session?.token]);
 
   const updateFlow = React.useCallback(async (id: string, input: FlowUpdateInput): Promise<FlowItem | null> => {
     if (!session?.token) {
       return null;
-    }
-    const applyLocal = (): FlowItem | null => {
-      let updated: FlowItem | null = null;
-      setFlows((currentFlows) => currentFlows.map((flow) => {
-        if (flow.id !== id) return flow;
-        updated = {
-          ...flow,
-          title: input.title ?? flow.title,
-          description: input.description ?? flow.description,
-          emoji: input.emoji ?? flow.emoji,
-          color: input.color ?? flow.color,
-          trigger: 'schedule' in input ? describeSchedule(input.schedule ?? null) : flow.trigger,
-        };
-        return updated;
-      }));
-      return updated;
-    };
-    if (isLocalDemoToken(session.token)) {
-      return applyLocal();
     }
     try {
       const response = await updateFlowRequest(session.token, id, input);
@@ -501,12 +410,6 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
   const runFlow = React.useCallback(async (id: string): Promise<FlowRunResult | null> => {
     if (!session?.token) {
       return null;
-    }
-    if (isLocalDemoToken(session.token)) {
-      return {
-        ok: true,
-        outputs: ['Ran in offline demo mode — start the Wingman server to execute real steps.'],
-      };
     }
     try {
       const response = await runFlowRequest(session.token, id);
@@ -593,32 +496,6 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     clearSession();
   }, [clearSession, session?.token]);
 
-  const sendChatMessage = React.useCallback(async (message: string) => {
-    if (!session?.token) {
-      return {
-        ok: false,
-        error: 'Sign in to chat with Pip.',
-      } as const;
-    }
-
-    try {
-      const response = await sendChat(session.token, message);
-      await refreshData();
-      return {
-        ok: true,
-        assistantMessage: response.assistantMessage,
-      } as const;
-    } catch (error) {
-      if (error instanceof Error && error.message === 'Unauthorized') {
-        clearSession();
-      }
-      return {
-        ok: false,
-        error: error instanceof Error ? error.message : 'Chat failed.',
-      } as const;
-    }
-  }, [clearSession, refreshData, session?.token]);
-
   const critiqueUi = React.useCallback(async (payload: { screenId: string; theme: string; viewport: { width: number; height: number } }) => {
     if (!session?.token) {
       throw new Error('Sign in first.');
@@ -641,7 +518,7 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     colors,
     currentUser,
     session,
-    fakeAccount,
+    demoAccount,
     briefing,
     apps,
     flows,
@@ -650,10 +527,13 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     settings,
     connectedAppsCount,
     activeFlowsCount,
+    dataLoading,
+    dataError,
     completeOnboarding: () => setAuthStage('sign-in'),
-    signIn,
+    signInWithDemoAccount,
     signInWithPassword,
-    createFakeAccount,
+    createAccount,
+    signOut: clearSession,
     beginConnection,
     refreshData,
     setThemeMode,
@@ -666,7 +546,6 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     setMemoryEnabled: (value) => setSettings((currentSettings) => ({ ...currentSettings, memoryEnabled: value })),
     setQuietHours: (value) => setSettings((currentSettings) => ({ ...currentSettings, quietHours: value })),
     setChatMessages,
-    sendChatMessage,
     streamChatMessage,
     clearChatThread,
     deleteAccount,

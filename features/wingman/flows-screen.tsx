@@ -19,6 +19,7 @@ import { usePipController } from '@/features/wingman/pip-controller';
 import {
   IconGlyph,
   Pip,
+  StateNotice,
   WingmanLabel,
   WingmanToggle,
 } from '@/features/wingman/primitives';
@@ -360,7 +361,7 @@ function CompactHeader({
 export function FlowsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { activeFlowsCount, colors, createFlow, flows, toggleFlow } = useWingman();
+  const { activeFlowsCount, colors, createFlow, dataError, dataLoading, flows, refreshData, toggleFlow } = useWingman();
   const { play: pipPlay } = usePipController();
   const newFlowScale = useSharedValue(1);
 
@@ -474,6 +475,28 @@ export function FlowsScreen() {
               />
             ))}
           </Animated.View>
+
+          {flows.length === 0 ? (
+            dataError ? (
+              <StateNotice
+                tone="error"
+                title="Couldn't load your flows"
+                body={dataError}
+                actionLabel="Try again"
+                onAction={() => void refreshData()}
+              />
+            ) : dataLoading ? (
+              <StateNotice tone="loading" title="Loading your flows…" />
+            ) : (
+              <StateNotice
+                pip="excited"
+                title="No flows yet"
+                body="Tap New flow to build your first automation — pick a schedule and what Pip should do."
+                actionLabel="New flow"
+                onAction={() => void handleCreateFlow()}
+              />
+            )
+          ) : null}
         </View>
       </ScrollView>
     </View>

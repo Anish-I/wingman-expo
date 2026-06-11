@@ -36,6 +36,7 @@ export function SettingsScreen() {
     setThemeMode,
     themeMode,
     deleteAccount,
+    signOut,
   } = useWingman();
 
   const openLink = React.useCallback(async (url: string) => {
@@ -70,10 +71,34 @@ export function SettingsScreen() {
     setQuietHours(quietHourOptions[nextIndex]!);
   }, [setQuietHours, settings.quietHours]);
 
+  const onSignOut = React.useCallback(() => {
+    Alert.alert('Sign out?', 'You can sign back in any time.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await Haptics.selectionAsync();
+          } catch {
+            // best-effort
+          }
+          signOut();
+          router.replace('/sign-in');
+        },
+      },
+    ]);
+  }, [router, signOut]);
+
   const isDark = resolvedTheme === 'dark';
-  const profileName = currentUser?.name ?? 'Sam Ortega';
-  const profilePhone = currentUser?.phone ?? '+1 (555) 123-4567';
-  const profileEmail = currentUser?.email ?? 'sam@wingman.dev';
+  const profileName = currentUser?.name?.trim() || '—';
+  const profileContact = [currentUser?.phone?.trim(), currentUser?.email?.trim()].filter(Boolean).join(' · ') || '—';
+  const initials = (currentUser?.name ?? '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('') || '👤';
 
   return (
     <ScrollView
@@ -113,7 +138,7 @@ export function SettingsScreen() {
               fontSize: 16,
               fontWeight: '800',
             }}>
-            SO
+            {initials}
           </Text>
         </View>
         <View style={{ flex: 1 }}>
@@ -133,7 +158,7 @@ export function SettingsScreen() {
               fontSize: 12,
               fontWeight: '700',
             }}>
-            {`${profilePhone} · ${profileEmail}`}
+            {profileContact}
           </Text>
         </View>
         <IconGlyph name="chevron-right" color={colors.fgSecondary} size={18} />
@@ -214,6 +239,17 @@ export function SettingsScreen() {
           label="Connected apps"
           color={colors.sky500}
           onPress={() => router.push('/apps')}
+        />
+      </SectionGroup>
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(210).duration(380).springify().damping(18)}>
+      <SectionGroup label="Account">
+        <SettingsRow
+          icon="arrow-right"
+          label="Sign out"
+          color={colors.fgSecondary}
+          onPress={onSignOut}
         />
         <SettingsRow
           icon="trash"

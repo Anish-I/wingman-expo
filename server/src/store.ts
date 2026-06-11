@@ -347,10 +347,10 @@ export class PgStore {
     return flow;
   }
 
-  async setFlowActive(flowId: string, active: boolean): Promise<Flow | null> {
+  async setFlowActive(flowId: string, userId: string, active: boolean): Promise<Flow | null> {
     const res = await this.pool.query(
-      'UPDATE flows SET active = $1 WHERE id = $2 RETURNING id, emoji, title, description, trigger, runs, color, active, app_slug AS "appSlug"',
-      [active, flowId],
+      'UPDATE flows SET active = $1 WHERE id = $2 AND user_id = $3 RETURNING id, emoji, title, description, trigger, runs, color, active, app_slug AS "appSlug"',
+      [active, flowId, userId],
     );
     const row = res.rows[0] as (Omit<Flow, 'active'> & { active: boolean }) | undefined;
     return row ? { ...row, active: Boolean(row.active) } : null;
@@ -567,6 +567,28 @@ export class PgStore {
 
   async clearHistory(userId: string): Promise<void> {
     await this.pool.query('DELETE FROM chat_messages WHERE user_id = $1', [userId]);
+  }
+
+  /**
+   * The persisted chat thread in display form: user/assistant turns with real
+   * text, in order. System prompts, tool-call envelopes, and tool results are
+   * dropped (they're orchestration internals, not part of the visible thread).
+   */
+  async getChatThread(userId: string): Promise<Array<{ id: string; from: 'user' | 'pip'; text: string }>> {
+    const res = await this.pool.query(
+      `SELECT id, role, content FROM chat_messages
+        WHERE user_id = $1 AND role IN ('user', 'assistant')
+        ORDER BY id ASC`,
+      [userId],
+    );
+    const rows = res.rows as Array<{ id: number | string; role: string; content: string }>;
+    return rows
+      .filter((r) => typeof r.content === 'string' && r.content.trim().length > 0)
+      .map((r) => ({
+        id: `history-${r.id}`,
+        from: r.role === 'user' ? 'user' : 'pip',
+        text: r.content,
+      }));
   }
 
   async getBriefing(userId: string): Promise<Briefing> {

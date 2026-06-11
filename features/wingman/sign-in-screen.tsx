@@ -87,65 +87,88 @@ function FieldShell({
   );
 }
 
+function ComingSoonCard({ title, body }: { title: string; body: string }) {
+  const { colors } = useWingman();
+
+  return (
+    <StickerCard
+      backgroundColor={colors.cardAlt}
+      borderColor={colors.border}
+      style={{ padding: 18, gap: 8 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <WingmanLabel color={colors.fgMuted}>Coming soon</WingmanLabel>
+      </View>
+      <Text
+        style={{
+          color: colors.ink,
+          fontFamily: wingmanFonts.display,
+          fontSize: 20,
+          fontWeight: '700',
+        }}>
+        {title}
+      </Text>
+      <Text
+        style={{
+          color: colors.fgSecondary,
+          fontFamily: wingmanFonts.text,
+          fontSize: 13,
+          fontWeight: '500',
+          lineHeight: 19,
+        }}>
+        {body}
+      </Text>
+    </StickerCard>
+  );
+}
+
 export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const {
     colors,
-    createFakeAccount,
-    fakeAccount,
-    signIn,
+    createAccount,
+    demoAccount,
+    signInWithDemoAccount,
     signInWithPassword,
   } = useWingman();
   const [tab, setTab] = React.useState<AuthTab>('password');
-  const [displayName, setDisplayName] = React.useState(fakeAccount.name);
-  const [credentialEmail, setCredentialEmail] = React.useState(fakeAccount.email);
-  const [credentialPassword, setCredentialPassword] = React.useState(fakeAccount.password);
-  const [magicEmail, setMagicEmail] = React.useState(fakeAccount.email);
-  const [magicLinkSent, setMagicLinkSent] = React.useState(false);
-  const [resendTimer, setResendTimer] = React.useState(30);
+  const [displayName, setDisplayName] = React.useState('');
+  const [credentialEmail, setCredentialEmail] = React.useState('');
+  const [credentialPassword, setCredentialPassword] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
   const [statusMessage, setStatusMessage] = React.useState<string | null>(null);
 
   const isCreateAccount = mode === 'create-account';
-  const title = isCreateAccount ? 'Meet your new wingman!' : 'Welcome back!';
+  const title = isCreateAccount ? 'Create your account' : 'Welcome back!';
   const subtitle = isCreateAccount
-    ? 'Use a fake email and password for now so we can get into the product and build the real features.'
-    : 'Use the fake email and password below to get into the app while we build the real auth later.';
+    ? 'Sign up with your email and a password. Your account and data live on the Wingman backend.'
+    : 'Sign in with your email and password to pick up where you left off.';
   const eyebrow = isCreateAccount ? 'Create your account' : 'Welcome back';
 
-  React.useEffect(() => {
-    if (!magicLinkSent || resendTimer === 0) {
-      return;
-    }
-
-    const timer = setInterval(() => {
-      setResendTimer((currentValue) => Math.max(currentValue - 1, 0));
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [magicLinkSent, resendTimer]);
-
   const emailIsValid = /\S+@\S+\.\S+/.test(credentialEmail);
-  const magicEmailIsValid = /\S+@\S+\.\S+/.test(magicEmail);
   const passwordIsValid = credentialPassword.trim().length >= 6;
   const canSubmitPassword = emailIsValid && passwordIsValid && (!isCreateAccount || displayName.trim().length >= 2);
 
-  const enterApp = async () => {
-    if (submitting) return;
+  const useDemoAccount = () => {
+    setDisplayName(demoAccount.name);
+    setCredentialEmail(demoAccount.email);
+    setCredentialPassword(demoAccount.password);
+    setStatusMessage('Demo account filled in. Tap Sign in to continue.');
+  };
 
+  const signInAsDemo = async () => {
+    if (submitting) return;
     setSubmitting(true);
     setStatusMessage(null);
-
-    try {
-      await runHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
-      await signIn();
-      router.replace('/(tabs)');
-    } catch (error) {
+    const result = await signInWithDemoAccount();
+    if (!result.ok) {
       await runHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error));
-      setStatusMessage(error instanceof Error ? error.message : 'Sign-in failed.');
+      setStatusMessage(result.error ?? 'Could not sign in to the demo account.');
       setSubmitting(false);
+      return;
     }
+    await runHaptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
+    router.replace('/(tabs)');
   };
 
   const submitPasswordFlow = async () => {
@@ -156,7 +179,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
 
     try {
       const result = await (isCreateAccount
-        ? createFakeAccount({
+        ? createAccount({
             name: displayName,
             email: credentialEmail,
             password: credentialPassword,
@@ -256,7 +279,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
                   padding: 16,
                   gap: 8,
                 }}>
-                <WingmanLabel color={colors.sky500}>Fake auth</WingmanLabel>
+                <WingmanLabel color={colors.sky500}>Demo account</WingmanLabel>
                 <Text
                   style={{
                     color: colors.ink,
@@ -264,7 +287,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
                     fontSize: 20,
                     fontWeight: '700',
                   }}>
-                  Demo credentials
+                  Try it instantly
                 </Text>
                 <Text
                   style={{
@@ -274,25 +297,32 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
                     fontWeight: '500',
                     lineHeight: 19,
                   }}>
-                  {`${fakeAccount.email} / ${fakeAccount.password}`}
+                  {`A real seeded account on the backend (${demoAccount.email}). Sign in to explore with sample flows and activity.`}
                 </Text>
-                <Pressable
-                  onPress={() => {
-                    setDisplayName(fakeAccount.name);
-                    setCredentialEmail(fakeAccount.email);
-                    setCredentialPassword(fakeAccount.password);
-                    setStatusMessage('Demo credentials restored.');
-                  }}>
-                  <Text
-                    style={{
-                      color: colors.sky500,
-                      fontFamily: wingmanFonts.text,
-                      fontSize: 13,
-                      fontWeight: '800',
-                    }}>
-                    Use demo values
-                  </Text>
-                </Pressable>
+                <View style={{ flexDirection: 'row', gap: 16, marginTop: 2 }}>
+                  <Pressable onPress={signInAsDemo} disabled={submitting}>
+                    <Text
+                      style={{
+                        color: colors.sky500,
+                        fontFamily: wingmanFonts.text,
+                        fontSize: 13,
+                        fontWeight: '800',
+                      }}>
+                      Sign in as demo
+                    </Text>
+                  </Pressable>
+                  <Pressable onPress={useDemoAccount}>
+                    <Text
+                      style={{
+                        color: colors.fgSecondary,
+                        fontFamily: wingmanFonts.text,
+                        fontSize: 13,
+                        fontWeight: '800',
+                      }}>
+                      Fill the form
+                    </Text>
+                  </Pressable>
+                </View>
               </StickerCard>
             </Animated.View>
           ) : null}
@@ -348,7 +378,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
                     onChangeText={setCredentialEmail}
                     keyboardType="email-address"
                     autoCapitalize="none"
-                    placeholder="sam@wingman.dev"
+                    placeholder="you@example.com"
                     placeholderTextColor={colors.fgMuted}
                     style={{
                       flex: 1,
@@ -363,12 +393,12 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
                 <FieldShell
                   label="Password"
                   icon="settings"
-                  hint="Use any six-plus character password. The demo default is pigeon123.">
+                  hint="At least six characters.">
                   <TextInput
                     value={credentialPassword}
                     onChangeText={setCredentialPassword}
                     secureTextEntry
-                    placeholder="pigeon123"
+                    placeholder="••••••••"
                     placeholderTextColor={colors.fgMuted}
                     style={{
                       flex: 1,
@@ -391,92 +421,22 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
             ) : null}
 
             {tab === 'email' ? (
-              <>
-                {!magicLinkSent ? (
-                  <>
-                    <FieldShell label="Email address" icon="mail">
-                      <TextInput
-                        value={magicEmail}
-                        onChangeText={setMagicEmail}
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                        placeholder="you@example.com"
-                        placeholderTextColor={colors.fgMuted}
-                        style={{
-                          flex: 1,
-                          color: colors.ink,
-                          fontFamily: wingmanFonts.text,
-                          fontSize: 15,
-                          fontWeight: '600',
-                        }}
-                      />
-                    </FieldShell>
-                    <WingmanButton
-                      fullWidth
-                      iconRight="arrow-right"
-                      disabled={!magicEmailIsValid || submitting}
-                      onPress={async () => {
-                        await runHaptic(() => Haptics.selectionAsync());
-                        setMagicLinkSent(true);
-                        setResendTimer(30);
-                      }}>
-                      {isCreateAccount ? 'Send sign-up link' : 'Send magic link'}
-                    </WingmanButton>
-                  </>
-                ) : (
-                  <>
-                    <StickerCard
-                      backgroundColor={colors.cardAlt}
-                      borderColor={colors.border}
-                      style={{
-                        padding: 18,
-                        gap: 10,
-                      }}>
-                      <WingmanLabel color={colors.sky500}>Check your inbox</WingmanLabel>
-                      <Text
-                        style={{
-                          color: colors.ink,
-                          fontFamily: wingmanFonts.display,
-                          fontSize: 22,
-                          fontWeight: '700',
-                        }}>
-                        Email sent
-                      </Text>
-                      <Text
-                        style={{
-                          color: colors.fgSecondary,
-                          fontFamily: wingmanFonts.text,
-                          fontSize: 14,
-                          fontWeight: '500',
-                          lineHeight: 20,
-                        }}>
-                        {`We sent a fake one-tap link to ${magicEmail}. Resend in ${resendTimer}s.`}
-                      </Text>
-                    </StickerCard>
-                    <WingmanButton fullWidth disabled={submitting} onPress={enterApp}>
-                      {submitting ? 'Opening...' : 'Continue to Wingman'}
-                    </WingmanButton>
-                  </>
-                )}
-              </>
+              <ComingSoonCard
+                title="Magic-link sign-in"
+                body="One-tap email links are on the roadmap. For now, use a password — it's the same account either way."
+              />
             ) : null}
 
             {tab === 'social' ? (
               <View style={{ gap: 12 }}>
-                <WingmanButton
-                  fullWidth
-                  variant="secondary"
-                  iconLeft="apple"
-                  disabled={submitting}
-                  onPress={enterApp}>
+                <ComingSoonCard
+                  title="Apple & Google sign-in"
+                  body="Social sign-in (including Apple Sign-In) lands in a later phase. Use email + password for now."
+                />
+                <WingmanButton fullWidth variant="secondary" iconLeft="apple" disabled>
                   Continue with Apple
                 </WingmanButton>
-                <WingmanButton
-                  fullWidth
-                  variant="social"
-                  iconLeft="google"
-                  disabled={submitting}
-                  onPress={enterApp}>
+                <WingmanButton fullWidth variant="social" iconLeft="google" disabled>
                   Continue with Google
                 </WingmanButton>
               </View>
@@ -508,7 +468,7 @@ export function SignInScreen({ mode = 'sign-in' }: { mode?: AuthMode }) {
                 lineHeight: 18,
                 textAlign: 'center',
               }}>
-              By continuing you agree to Wingman&apos;s Terms and Privacy Policy. This auth flow is fake for now so we can keep shipping product.
+              By continuing you agree to Wingman&apos;s Terms and Privacy Policy.
             </Text>
           </Animated.View>
         </View>

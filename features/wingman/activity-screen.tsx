@@ -7,7 +7,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import type { ActivityEvent, FlowItem } from '@/features/wingman/data';
 import { useWingman } from '@/features/wingman/provider';
-import { IconGlyph, PipCircle, WingmanLabel } from '@/features/wingman/primitives';
+import { IconGlyph, PipCircle, StateNotice, WingmanLabel } from '@/features/wingman/primitives';
 import {
   withAlpha,
   wingmanFonts,
@@ -219,7 +219,7 @@ function ActivitySection({
 
 export function ActivityScreen() {
   const insets = useSafeAreaInsets();
-  const { colors, events } = useWingman();
+  const { colors, dataError, dataLoading, events, refreshData } = useWingman();
   const todayEvents = events.filter((event) => sectionFor(event) === 'Today');
   const earlierEvents = events.filter((event) => sectionFor(event) === 'Earlier');
 
@@ -293,6 +293,26 @@ export function ActivityScreen() {
 
       <ActivitySection title="Today" events={todayEvents} offset={0} />
       <ActivitySection title="Earlier" events={earlierEvents} offset={todayEvents.length} />
+
+      {events.length === 0 ? (
+        dataError ? (
+          <StateNotice
+            tone="error"
+            title="Couldn't load activity"
+            body={dataError}
+            actionLabel="Try again"
+            onAction={() => void refreshData()}
+          />
+        ) : dataLoading ? (
+          <StateNotice tone="loading" title="Loading activity…" />
+        ) : (
+          <StateNotice
+            pip="sleeping"
+            title="Nothing here yet"
+            body="When Pip runs a flow or takes an action, it shows up here."
+          />
+        )
+      ) : null}
     </ScrollView>
   );
 }

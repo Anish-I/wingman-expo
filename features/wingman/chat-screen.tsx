@@ -29,6 +29,7 @@ import { useWingman } from '@/features/wingman/provider';
 import {
   Chip,
   IconGlyph,
+  StateNotice,
   StickerCard,
   TypingDots,
 } from '@/features/wingman/primitives';
@@ -417,6 +418,14 @@ export function ChatScreen() {
           gap: 10,
           paddingBottom: 22,
         }}>
+        {chatMessages.length === 0 && !isTyping ? (
+          <StateNotice
+            pip="wave"
+            title="Say hi to Pip"
+            body="Ask Pip to draft an email, check your calendar, set a reminder, or run one of your flows."
+          />
+        ) : null}
+
         {chatMessages.map((message, index) => {
           const previousMessage = chatMessages[index - 1];
 

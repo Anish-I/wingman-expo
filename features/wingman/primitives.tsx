@@ -828,6 +828,84 @@ export function TypingDots({ color }: { color: string }) {
   );
 }
 
+/**
+ * Honest empty / loading / error state. Use when a list has no real data so the
+ * UI never shows fake placeholders — it shows what's actually true.
+ */
+export function StateNotice({
+  tone = 'empty',
+  pip = 'thinking',
+  title,
+  body,
+  actionLabel,
+  onAction,
+}: {
+  tone?: 'empty' | 'loading' | 'error';
+  pip?: PipVariant;
+  title: string;
+  body?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  const { colors } = useWingman();
+  const accent = tone === 'error' ? colors.coral500 : colors.sky500;
+
+  return (
+    <View
+      style={{
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        paddingVertical: 36,
+        paddingHorizontal: 24,
+      }}>
+      <Pip variant={tone === 'error' ? 'worried' : tone === 'loading' ? 'thinking' : pip} size={72} />
+      <Text
+        style={{
+          color: colors.ink,
+          fontFamily: wingmanFonts.display,
+          fontSize: 18,
+          fontWeight: '700',
+          textAlign: 'center',
+        }}>
+        {title}
+      </Text>
+      {body ? (
+        <Text
+          style={{
+            color: colors.fgSecondary,
+            fontFamily: wingmanFonts.text,
+            fontSize: 13,
+            fontWeight: '500',
+            lineHeight: 19,
+            textAlign: 'center',
+            maxWidth: 300,
+          }}>
+          {body}
+        </Text>
+      ) : null}
+      {actionLabel && onAction ? (
+        <Pressable
+          onPress={onAction}
+          style={({ pressed }) => ({
+            marginTop: 4,
+            paddingHorizontal: 16,
+            paddingVertical: 10,
+            borderRadius: 999,
+            borderWidth: 1.5,
+            borderColor: accent,
+            backgroundColor: withAlpha(accent, 0.12),
+            opacity: pressed ? 0.75 : 1,
+          })}>
+          <Text style={{ color: accent, fontFamily: wingmanFonts.text, fontSize: 13, fontWeight: '800' }}>
+            {actionLabel}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 export function ThemeModePill({ themeMode }: { themeMode: ThemeMode }) {
   const { colors } = useWingman();
 

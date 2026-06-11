@@ -269,6 +269,10 @@ export async function* sendChatStream(token: string, message: string): AsyncGene
   }
 }
 
+export async function fetchChatHistory(token: string) {
+  return requestJson<{ messages: { id: string; from: 'user' | 'pip'; text: string }[] }>('/chat/history', { token });
+}
+
 export async function clearChat(token: string) {
   return requestJson<{ ok: boolean }>('/chat/clear', { method: 'POST', token });
 }

@@ -11,6 +11,7 @@ import { usePipController } from '@/features/wingman/pip-controller';
 import {
   IconGlyph,
   ScreenHeader,
+  StateNotice,
   StickerCard,
 } from '@/features/wingman/primitives';
 import { withAlpha, wingmanFonts, wingmanLayout } from '@/features/wingman/theme';
@@ -154,9 +155,10 @@ export function AppsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { connected } = useLocalSearchParams<{ connected?: string }>();
-  const { apps, beginConnection, colors, connectedAppsCount, refreshData } = useWingman();
+  const { apps, beginConnection, colors, connectedAppsCount, dataError, dataLoading, refreshData } = useWingman();
   const { play: pipPlay } = usePipController();
   const [query, setQuery] = React.useState('');
+  const [connectError, setConnectError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (connected) {
@@ -169,8 +171,17 @@ export function AppsScreen() {
     app.name.toLowerCase().includes(query.trim().toLowerCase()),
   );
   const handleConnect = React.useCallback(async (appId: string) => {
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await beginConnection(appId);
+    setConnectError(null);
+    try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {
+      // Haptics are best-effort.
+    }
+    try {
+      await beginConnection(appId);
+    } catch (error) {
+      setConnectError(error instanceof Error ? error.message : 'Could not start the connection.');
+    }
   }, [beginConnection]);
 
   return (
@@ -183,9 +194,22 @@ export function AppsScreen() {
       }}>
       <ScreenHeader
         title="Apps"
-        subtitle={`${connectedAppsCount} connected · 1,000+ available`}
+        subtitle={`${connectedAppsCount} connected · ${apps.length} available`}
         onBack={() => router.back()}
       />
+
+      {connectError ? (
+        <View style={{ paddingHorizontal: wingmanLayout.screenPadding }}>
+          <StickerCard
+            backgroundColor={withAlpha(colors.coral500, 0.1)}
+            borderColor={withAlpha(colors.coral500, 0.45)}
+            style={{ paddingHorizontal: 14, paddingVertical: 12 }}>
+            <Text style={{ color: colors.ink, fontFamily: wingmanFonts.text, fontSize: 12, fontWeight: '700', lineHeight: 18 }}>
+              {connectError}
+            </Text>
+          </StickerCard>
+        </View>
+      ) : null}
 
       <View style={{ paddingHorizontal: wingmanLayout.screenPadding }}>
         <StickerCard
@@ -230,6 +254,24 @@ export function AppsScreen() {
           />
         ))}
       </View>
+
+      {apps.length === 0 ? (
+        dataError ? (
+          <StateNotice
+            tone="error"
+            title="Couldn't load your apps"
+            body={dataError}
+            actionLabel="Try again"
+            onAction={() => void refreshData()}
+          />
+        ) : dataLoading ? (
+          <StateNotice tone="loading" title="Loading your apps…" />
+        ) : (
+          <StateNotice title="No apps to show" body="Connect an account to let Pip act on your behalf." />
+        )
+      ) : filteredApps.length === 0 ? (
+        <StateNotice pip="question" title={`No apps match “${query.trim()}”`} body="Try a different name." />
+      ) : null}
     </ScrollView>
   );
 }

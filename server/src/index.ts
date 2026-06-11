@@ -413,6 +413,14 @@ app.post('/chat', async (request, reply) => {
   return reply.send({ assistantMessage: assembled, action, activityCreated });
 });
 
+app.get('/chat/history', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  return reply.send({ messages: await store.getChatThread(user.id) });
+});
+
 app.post('/chat/clear', async (request, reply) => {
   const user = await getAuthedUser(request);
   if (!user) {
@@ -545,7 +553,7 @@ app.patch('/flows/:id', async (request, reply) => {
   }
   const params = z.object({ id: z.string() }).parse(request.params);
   const payload = z.object({ active: z.boolean() }).parse(request.body);
-  const flow = await store.setFlowActive(params.id, payload.active);
+  const flow = await store.setFlowActive(params.id, user.id, payload.active);
   if (!flow) {
     return reply.status(404).send({ error: 'Flow not found.' });
   }
