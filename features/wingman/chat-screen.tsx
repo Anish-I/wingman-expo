@@ -3,7 +3,6 @@ import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
 import React from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -25,6 +24,7 @@ import {
   PipCompanion,
   type PipAnchorRect,
 } from '@/features/wingman/pip-companion';
+import { confirmAction, notify } from '@/features/wingman/confirm';
 import { useWingman } from '@/features/wingman/provider';
 import {
   Chip,
@@ -264,23 +264,23 @@ export function ChatScreen() {
     try {
       await Share.share({ message: text || 'Empty thread.' });
     } catch {
-      Alert.alert('Could not share transcript.');
+      notify('Could not share transcript.');
     }
     setMenuOpen(false);
   }, [chatMessages]);
 
   const onClearThread = React.useCallback(() => {
-    Alert.alert('Clear thread?', "Pip won't remember this conversation.", [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clear',
-        style: 'destructive',
-        onPress: async () => {
-          await clearChatThread();
-          setMenuOpen(false);
-        },
-      },
-    ]);
+    void (async () => {
+      const confirmed = await confirmAction({
+        title: 'Clear thread?',
+        message: "Pip won't remember this conversation.",
+        confirmLabel: 'Clear',
+        destructive: true,
+      });
+      if (!confirmed) return;
+      await clearChatThread();
+      setMenuOpen(false);
+    })();
   }, [clearChatThread]);
 
   return (
@@ -603,7 +603,7 @@ export function ChatScreen() {
                 voice.toggle();
                 return;
               }
-              Alert.alert(
+              notify(
                 'Voice input',
                 "Speech recognition isn't available on this device. Make sure the system speech/voice service is enabled, or type your message instead.",
               );

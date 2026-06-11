@@ -41,3 +41,17 @@ export function confirmAction(options: {
     ]);
   });
 }
+
+/**
+ * Single-button informational alert that also works on web. Same RNW caveat as
+ * above — a plain `Alert.alert(title, message)` is unreliable on web — so this
+ * routes to the browser's `window.alert` on web and `Alert.alert` on native.
+ */
+export function notify(title: string, message?: string): void {
+  if (Platform.OS === 'web') {
+    const w = globalThis as { alert?: (msg?: string) => void };
+    if (typeof w.alert === 'function') w.alert(message ? `${title}\n\n${message}` : title);
+    return;
+  }
+  Alert.alert(title, message);
+}

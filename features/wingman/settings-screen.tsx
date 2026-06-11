@@ -2,10 +2,11 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
 import React from 'react';
-import { Alert, Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { confirmAction, notify } from '@/features/wingman/confirm';
 import { useWingman } from '@/features/wingman/provider';
 import { wingmanSupportLinks } from '@/features/wingman/data';
 import {
@@ -45,9 +46,9 @@ export function SettingsScreen() {
     await Haptics.selectionAsync();
     const result = await sendTestNotification();
     if (result.ok) {
-      Alert.alert('Sent', 'A test notification is on its way to this device.');
+      notify('Sent', 'A test notification is on its way to this device.');
     } else {
-      Alert.alert('Could not send', result.error ?? 'Push is not available here.');
+      notify('Could not send', result.error ?? 'Push is not available here.');
     }
   }, [sendTestNotification]);
 
@@ -55,26 +56,22 @@ export function SettingsScreen() {
     try {
       await WebBrowser.openBrowserAsync(url);
     } catch {
-      Linking.openURL(url).catch(() => Alert.alert('Could not open link.'));
+      Linking.openURL(url).catch(() => notify('Could not open link.'));
     }
   }, []);
 
   const onDeleteAccount = React.useCallback(() => {
-    Alert.alert(
-      'Delete your Wingman account?',
-      "This removes Pip's memory of you, your apps and your flows. This cannot be undone.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            await deleteAccount();
-          },
-        },
-      ],
-    );
+    void (async () => {
+      const confirmed = await confirmAction({
+        title: 'Delete your Wingman account?',
+        message: "This removes Pip's memory of you, your apps and your flows. This cannot be undone.",
+        confirmLabel: 'Delete',
+        destructive: true,
+      });
+      if (!confirmed) return;
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      await deleteAccount();
+    })();
   }, [deleteAccount]);
   const cycleQuietHours = React.useCallback(async () => {
     await Haptics.selectionAsync();
@@ -84,22 +81,22 @@ export function SettingsScreen() {
   }, [setQuietHours, settings.quietHours]);
 
   const onSignOut = React.useCallback(() => {
-    Alert.alert('Sign out?', 'You can sign back in any time.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign out',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await Haptics.selectionAsync();
-          } catch {
-            // best-effort
-          }
-          signOut();
-          router.replace('/sign-in');
-        },
-      },
-    ]);
+    void (async () => {
+      const confirmed = await confirmAction({
+        title: 'Sign out?',
+        message: 'You can sign back in any time.',
+        confirmLabel: 'Sign out',
+        destructive: true,
+      });
+      if (!confirmed) return;
+      try {
+        await Haptics.selectionAsync();
+      } catch {
+        // best-effort
+      }
+      signOut();
+      router.replace('/sign-in');
+    })();
   }, [router, signOut]);
 
   const isDark = resolvedTheme === 'dark';
