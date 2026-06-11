@@ -2,13 +2,12 @@ import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as WebBrowser from 'expo-web-browser';
 import React from 'react';
-import { Linking, Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { confirmAction, notify } from '@/features/wingman/confirm';
 import { useWingman } from '@/features/wingman/provider';
-import { wingmanSupportLinks } from '@/features/wingman/data';
 import {
   IconGlyph,
   ScreenHeader,
@@ -340,39 +339,11 @@ export function SettingsScreen() {
 
       <Animated.View entering={FadeInDown.delay(240).duration(380).springify().damping(18)}>
       <SectionGroup label="Support">
-        <SettingsRow
-          icon="help-circle"
-          label="Help center"
-          color={colors.coral500}
-          onPress={() => openLink(wingmanSupportLinks.helpCenter)}
-        />
-        <SettingsRow
-          icon="mail"
-          label="Contact Pip's humans"
-          color={colors.sky500}
-          onPress={() => Linking.openURL(`mailto:${wingmanSupportLinks.contactEmail}?subject=Hello%20Pip`)}
-        />
-        <SettingsRow
-          icon="shield-checkmark"
-          label="Privacy policy"
-          color={colors.mint500}
-          onPress={() => openLink(wingmanSupportLinks.privacyPolicy)}
-        />
+        <SettingsRow icon="help-circle" label="Help center" color={colors.coral500} comingSoon />
+        <SettingsRow icon="mail" label="Contact Pip's humans" color={colors.sky500} comingSoon />
+        <SettingsRow icon="shield-checkmark" label="Privacy policy" color={colors.mint500} comingSoon />
       </SectionGroup>
       </Animated.View>
-
-      {__DEV__ ? (
-        <Animated.View entering={FadeInDown.delay(300).duration(380).springify().damping(18)}>
-        <SectionGroup label="Developer">
-          <SettingsRow
-            icon="chat"
-            label="UI critique lab"
-            color={colors.sky500}
-            onPress={() => router.push('/ui-critique' as never)}
-          />
-        </SectionGroup>
-        </Animated.View>
-      ) : null}
 
       <Pressable style={{ paddingHorizontal: wingmanLayout.screenPadding }}>
         <Text

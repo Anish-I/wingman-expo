@@ -753,6 +753,7 @@ export function SettingsRow({
   right,
   onPress,
   destructive = false,
+  comingSoon = false,
 }: {
   icon: IconName;
   label: string;
@@ -761,18 +762,24 @@ export function SettingsRow({
   right?: React.ReactNode;
   onPress?: () => void;
   destructive?: boolean;
+  comingSoon?: boolean;
 }) {
   const { colors } = useWingman();
+  // "Coming soon" rows are inert: grayed out, no press, and a "Soon" badge in
+  // place of the chevron so it reads as deliberately-not-yet, not broken.
+  const iconColor = comingSoon ? colors.fgMuted : color;
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={comingSoon ? undefined : onPress}
+      disabled={comingSoon}
       style={{
         paddingHorizontal: 14,
         paddingVertical: 12,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
+        opacity: comingSoon ? 0.55 : 1,
       }}>
       <View
         style={{
@@ -780,36 +787,60 @@ export function SettingsRow({
           height: 32,
           borderRadius: 10,
           borderWidth: 1.5,
-          borderColor: withAlpha(color, 0.45),
-          backgroundColor: withAlpha(color, 0.16),
+          borderColor: withAlpha(iconColor, 0.45),
+          backgroundColor: withAlpha(iconColor, 0.16),
           alignItems: 'center',
           justifyContent: 'center',
           borderCurve: 'continuous',
         }}>
-        <IconGlyph name={icon} color={color} size={16} />
+        <IconGlyph name={icon} color={iconColor} size={16} />
       </View>
       <Text
         style={{
           flex: 1,
-          color: destructive ? colors.coral500 : colors.ink,
+          color: comingSoon ? colors.fgMuted : destructive ? colors.coral500 : colors.ink,
           fontFamily: wingmanFonts.text,
           fontSize: 15,
           fontWeight: '700',
         }}>
         {label}
       </Text>
-      {value ? (
-        <Text
+      {comingSoon ? (
+        <View
           style={{
-            color: colors.fgMuted,
-            fontFamily: wingmanFonts.text,
-            fontSize: 12,
-            fontWeight: '700',
+            paddingHorizontal: 8,
+            paddingVertical: 3,
+            borderRadius: 999,
+            backgroundColor: withAlpha(colors.fgMuted, 0.16),
           }}>
-          {value}
-        </Text>
-      ) : null}
-      {right ?? <IconGlyph name="chevron-right" color={colors.fgMuted} size={16} />}
+          <Text
+            style={{
+              color: colors.fgMuted,
+              fontFamily: wingmanFonts.text,
+              fontSize: 10,
+              fontWeight: '800',
+              textTransform: 'uppercase',
+              letterSpacing: 0.6,
+            }}>
+            Soon
+          </Text>
+        </View>
+      ) : (
+        <>
+          {value ? (
+            <Text
+              style={{
+                color: colors.fgMuted,
+                fontFamily: wingmanFonts.text,
+                fontSize: 12,
+                fontWeight: '700',
+              }}>
+              {value}
+            </Text>
+          ) : null}
+          {right ?? <IconGlyph name="chevron-right" color={colors.fgMuted} size={16} />}
+        </>
+      )}
     </Pressable>
   );
 }
