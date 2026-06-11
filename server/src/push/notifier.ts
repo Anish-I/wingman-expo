@@ -41,19 +41,33 @@ function parseHour(token: string): number | null {
   return m[2] === 'pm' ? base + 12 : base;
 }
 
+/** The hour-of-day (0–23) at `now` in the given IANA timezone. Falls back to the
+ *  server's local hour when no zone is given or the zone is invalid. */
+function hourInZone(now: Date, timeZone?: string): number {
+  if (!timeZone) return now.getHours();
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone }).formatToParts(now);
+    const raw = parts.find((p) => p.type === 'hour')?.value;
+    const h = raw ? parseInt(raw, 10) : now.getHours();
+    return h === 24 ? 0 : h; // some platforms render midnight as 24
+  } catch {
+    return now.getHours();
+  }
+}
+
 /**
  * Is `now` inside the user's quiet-hours window? Windows like "10pm - 7am" wrap
  * past midnight. "Off" (or anything unparseable) means never quiet. Evaluated in
- * the server's local time — a per-user timezone is a future refinement.
+ * the user's `timeZone` when provided, else the server's local time.
  */
-export function isQuietNow(quietHours: string, now: Date = new Date()): boolean {
+export function isQuietNow(quietHours: string, now: Date = new Date(), timeZone?: string): boolean {
   if (!quietHours || quietHours.trim().toLowerCase() === 'off') return false;
   const parts = quietHours.split('-').map((s) => s.trim());
   if (parts.length !== 2) return false;
   const start = parseHour(parts[0]!);
   const end = parseHour(parts[1]!);
   if (start == null || end == null || start === end) return false;
-  const h = now.getHours();
+  const h = hourInZone(now, timeZone);
   return start < end ? h >= start && h < end : h >= start || h < end;
 }
 
@@ -84,9 +98,9 @@ export function createNotifier(env: NotifierEnv): Notifier {
     }
   }
 
-  async function sendExpo(token: string, message: PushMessage) {
+  async function sendExpo(token: string, message: PushMessage, store: PgStore) {
     try {
-      await fetch(EXPO_PUSH_ENDPOINT, {
+      const res = await fetch(EXPO_PUSH_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -96,6 +110,14 @@ export function createNotifier(env: NotifierEnv): Notifier {
           data: message.url ? { url: message.url } : {},
         }),
       });
+      // Expo replies with a per-message ticket. A DeviceNotRegistered error means
+      // the app was uninstalled / token rotated — drop it so we stop trying.
+      const json = (await res.json().catch(() => null)) as
+        | { data?: { status?: string; details?: { error?: string } } }
+        | null;
+      if (json?.data?.status === 'error' && json.data.details?.error === 'DeviceNotRegistered') {
+        await store.removePushExpoToken(token).catch(() => {});
+      }
     } catch {
       // Best-effort; a transient Expo error shouldn't break the caller.
     }
@@ -104,7 +126,7 @@ export function createNotifier(env: NotifierEnv): Notifier {
   async function notify(store: PgStore, userId: string, message: PushMessage): Promise<void> {
     const settings = await store.getSettings(userId);
     if (!settings.pushEnabled) return;
-    if (isQuietNow(settings.quietHours)) return;
+    if (isQuietNow(settings.quietHours, new Date(), settings.timezone || undefined)) return;
 
     const targets = await store.getPushSubscriptions(userId);
     if (targets.length === 0) return;
@@ -118,7 +140,7 @@ export function createNotifier(env: NotifierEnv): Notifier {
           }
           return Promise.resolve();
         }
-        if (t.expoToken) return sendExpo(t.expoToken, message);
+        if (t.expoToken) return sendExpo(t.expoToken, message, store);
         return Promise.resolve();
       }),
     );

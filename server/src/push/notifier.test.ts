@@ -31,3 +31,12 @@ test('Off (or junk) is never quiet', () => {
   assert.equal(isQuietNow('', at(3)), false);
   assert.equal(isQuietNow('nonsense', at(3)), false);
 });
+
+test('quiet hours evaluate in the user timezone, not the server', () => {
+  // A fixed instant: 2024-01-01T05:00:00Z.
+  // In New York (UTC-5) that's 00:00 -> inside "10pm - 7am" (quiet).
+  // In Tokyo (UTC+9) that's 14:00 -> outside the window (not quiet).
+  const instant = new Date('2024-01-01T05:00:00Z');
+  assert.equal(isQuietNow('10pm - 7am', instant, 'America/New_York'), true);
+  assert.equal(isQuietNow('10pm - 7am', instant, 'Asia/Tokyo'), false);
+});

@@ -107,6 +107,7 @@ export type WingmanSettings = {
   pushEnabled: boolean;
   quietHours: string;
   memoryEnabled: boolean;
+  timezone: string;
 };
 
 export async function fetchSettings(token: string) {

@@ -321,6 +321,7 @@ const updateSettingsSchema = z.object({
   pushEnabled: z.boolean().optional(),
   quietHours: z.string().max(40).optional(),
   memoryEnabled: z.boolean().optional(),
+  timezone: z.string().max(64).optional(),
 });
 
 app.put('/settings', async (request, reply) => {

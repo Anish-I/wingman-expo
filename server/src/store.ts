@@ -293,15 +293,15 @@ export class PgStore {
    *  every caller gets a concrete value (never null). Scoped to the owner. */
   async getSettings(userId: string): Promise<UserSettings> {
     const res = await this.pool.query(
-      'SELECT push_enabled AS "pushEnabled", quiet_hours AS "quietHours", memory_enabled AS "memoryEnabled" FROM user_settings WHERE user_id = $1',
+      'SELECT push_enabled AS "pushEnabled", quiet_hours AS "quietHours", memory_enabled AS "memoryEnabled", timezone FROM user_settings WHERE user_id = $1',
       [userId],
     );
     const row = res.rows[0] as UserSettings | undefined;
-    if (row) return { ...row, pushEnabled: Boolean(row.pushEnabled), memoryEnabled: Boolean(row.memoryEnabled) };
-    const defaults: UserSettings = { pushEnabled: true, quietHours: '10pm - 7am', memoryEnabled: true };
+    if (row) return { ...row, pushEnabled: Boolean(row.pushEnabled), memoryEnabled: Boolean(row.memoryEnabled), timezone: row.timezone ?? '' };
+    const defaults: UserSettings = { pushEnabled: true, quietHours: '10pm - 7am', memoryEnabled: true, timezone: '' };
     await this.pool.query(
-      'INSERT INTO user_settings (user_id, push_enabled, quiet_hours, memory_enabled, updated_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING',
-      [userId, defaults.pushEnabled, defaults.quietHours, defaults.memoryEnabled, nowIso()],
+      'INSERT INTO user_settings (user_id, push_enabled, quiet_hours, memory_enabled, timezone, updated_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (user_id) DO NOTHING',
+      [userId, defaults.pushEnabled, defaults.quietHours, defaults.memoryEnabled, defaults.timezone, nowIso()],
     );
     return defaults;
   }
@@ -313,13 +313,15 @@ export class PgStore {
       pushEnabled: input.pushEnabled ?? current.pushEnabled,
       quietHours: input.quietHours ?? current.quietHours,
       memoryEnabled: input.memoryEnabled ?? current.memoryEnabled,
+      timezone: input.timezone ?? current.timezone,
     };
     await this.pool.query(
-      `INSERT INTO user_settings (user_id, push_enabled, quiet_hours, memory_enabled, updated_at)
-       VALUES ($1,$2,$3,$4,$5)
+      `INSERT INTO user_settings (user_id, push_enabled, quiet_hours, memory_enabled, timezone, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6)
        ON CONFLICT (user_id) DO UPDATE SET push_enabled = EXCLUDED.push_enabled,
-         quiet_hours = EXCLUDED.quiet_hours, memory_enabled = EXCLUDED.memory_enabled, updated_at = EXCLUDED.updated_at`,
-      [userId, next.pushEnabled, next.quietHours, next.memoryEnabled, nowIso()],
+         quiet_hours = EXCLUDED.quiet_hours, memory_enabled = EXCLUDED.memory_enabled,
+         timezone = EXCLUDED.timezone, updated_at = EXCLUDED.updated_at`,
+      [userId, next.pushEnabled, next.quietHours, next.memoryEnabled, next.timezone, nowIso()],
     );
     return next;
   }
@@ -371,6 +373,11 @@ export class PgStore {
   /** Remove a dead web subscription (server got 404/410 from the push service). */
   async removePushEndpoint(endpoint: string): Promise<void> {
     await this.pool.query('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
+  }
+
+  /** Remove a dead native token (Expo reported DeviceNotRegistered). */
+  async removePushExpoToken(expoToken: string): Promise<void> {
+    await this.pool.query('DELETE FROM push_subscriptions WHERE expo_token = $1', [expoToken]);
   }
 
   // --- apps / connections ---

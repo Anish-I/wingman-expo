@@ -124,8 +124,11 @@ CREATE TABLE IF NOT EXISTS user_settings (
   push_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
   quiet_hours    TEXT NOT NULL DEFAULT '10pm - 7am',
   memory_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  timezone       TEXT NOT NULL DEFAULT '',
   updated_at     TEXT NOT NULL
 );
+-- Added after the table shipped; idempotent so existing deployments pick it up.
+ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT '';
 
 -- Real push targets. A web browser stores a Web Push subscription (endpoint +
 -- VAPID keys); a native build stores an Expo push token. A user can have several

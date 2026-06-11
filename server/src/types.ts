@@ -16,6 +16,9 @@ export type UserSettings = {
   pushEnabled: boolean;
   quietHours: string;
   memoryEnabled: boolean;
+  /** IANA timezone (e.g. "America/New_York") used to evaluate quiet hours. Empty
+   *  string means "not set" — quiet hours then fall back to server-local time. */
+  timezone: string;
 };
 
 /** A registration request from a client for push delivery. */

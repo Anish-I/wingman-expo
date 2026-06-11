@@ -25,16 +25,17 @@ test('settings default sensibly and persist a partial update', { skip }, async (
   const id = await makeUser(store);
 
   const defaults = await store.getSettings(id);
-  assert.deepEqual(defaults, { pushEnabled: true, quietHours: '10pm - 7am', memoryEnabled: true });
+  assert.deepEqual(defaults, { pushEnabled: true, quietHours: '10pm - 7am', memoryEnabled: true, timezone: '' });
 
-  const updated = await store.updateSettings(id, { memoryEnabled: false, quietHours: '9pm - 6am' });
+  const updated = await store.updateSettings(id, { memoryEnabled: false, quietHours: '9pm - 6am', timezone: 'America/New_York' });
   assert.equal(updated.memoryEnabled, false);
   assert.equal(updated.quietHours, '9pm - 6am');
+  assert.equal(updated.timezone, 'America/New_York');
   assert.equal(updated.pushEnabled, true); // untouched
 
   // Re-read proves persistence, not just the returned object.
   const reread = await store.getSettings(id);
-  assert.deepEqual(reread, { pushEnabled: true, quietHours: '9pm - 6am', memoryEnabled: false });
+  assert.deepEqual(reread, { pushEnabled: true, quietHours: '9pm - 6am', memoryEnabled: false, timezone: 'America/New_York' });
 });
 
 test('updateProfile changes name + phone, scoped to the owner', { skip }, async () => {

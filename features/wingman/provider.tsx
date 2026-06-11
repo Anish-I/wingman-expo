@@ -28,6 +28,13 @@ import {
 } from '@/features/wingman/api';
 import { disableWebPush, enableWebPush, isWebPushSupported } from '@/features/wingman/push-web';
 import {
+  addNotificationResponseListener,
+  disableNativePush,
+  enableNativePush,
+  isNativePushSupported,
+} from '@/features/wingman/push-native';
+import { router } from 'expo-router';
+import {
   type AppIntegration,
   type AuthSession,
   type AuthStage,
@@ -52,7 +59,17 @@ type WingmanSettings = {
   pushEnabled: boolean;
   quietHours: string;
   memoryEnabled: boolean;
+  timezone: string;
 };
+
+/** The device's IANA timezone (e.g. "America/New_York"), or '' if unavailable. */
+function deviceTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+  } catch {
+    return '';
+  }
+}
 
 type AuthResult = {
   ok: boolean;
@@ -171,6 +188,7 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     pushEnabled: true,
     quietHours: '10pm - 7am',
     memoryEnabled: true,
+    timezone: '',
   });
 
   const resolvedTheme: ResolvedTheme = themeMode === 'auto' ? systemScheme : themeMode;
@@ -285,6 +303,41 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [session?.token]);
+
+  // Native: tapping a push notification navigates to its target route.
+  React.useEffect(() => {
+    if (!isNativePushSupported()) return;
+    const unsubscribe = addNotificationResponseListener((url) => {
+      try { router.push(url as never); } catch { /* invalid route — ignore */ }
+    });
+    return unsubscribe;
+  }, []);
+
+  // Native: re-mint and re-register the Expo push token each app open while push
+  // is on (tokens can rotate). Web re-subscription is idempotent and cheap.
+  React.useEffect(() => {
+    if (!session?.token || !settings.pushEnabled) return;
+    if (isNativePushSupported()) {
+      void enableNativePush(session.token);
+    }
+  }, [session?.token, settings.pushEnabled]);
+
+  // Keep the server's stored timezone matched to this device so quiet hours are
+  // evaluated in the user's local time (and follow them when they travel).
+  React.useEffect(() => {
+    const token = session?.token;
+    if (!token) return;
+    const tz = deviceTimezone();
+    if (!tz || tz === settings.timezone) return;
+    void (async () => {
+      try {
+        const { settings: saved } = await updateSettingsRequest(token, { timezone: tz });
+        setSettings(saved);
+      } catch {
+        // Non-fatal; quiet hours just falls back to server-local time.
+      }
+    })();
+  }, [session?.token, settings.timezone]);
 
   const persistSession = React.useCallback((nextSession: AuthSession) => {
     setSession(nextSession);
@@ -501,17 +554,22 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
   }, [clearSession, session?.token, settings]);
 
   const setPushEnabled = React.useCallback(async (value: boolean) => {
-    // Turning push ON registers this browser for Web Push first; if the user
-    // denies permission we don't flip the stored setting to a lie.
-    if (value && isWebPushSupported() && session?.token) {
-      const result = await enableWebPush(session.token);
-      if (!result.ok) {
-        // Surface nothing here; the screen reads pushSupported/permission to explain.
-        return;
+    const token = session?.token;
+    // Turning push ON registers this device first; if the user denies permission
+    // we don't flip the stored setting to a lie.
+    if (token) {
+      if (value) {
+        if (isWebPushSupported()) {
+          const result = await enableWebPush(token);
+          if (!result.ok) return;
+        } else if (isNativePushSupported()) {
+          const result = await enableNativePush(token);
+          if (!result.ok) return;
+        }
+      } else {
+        if (isWebPushSupported()) await disableWebPush(token);
+        else if (isNativePushSupported()) await disableNativePush(token);
       }
-    }
-    if (!value && isWebPushSupported() && session?.token) {
-      await disableWebPush(session.token);
     }
     await persistSettings({ pushEnabled: value });
   }, [persistSettings, session?.token]);
@@ -543,11 +601,21 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
   const sendTestNotification = React.useCallback(async (): Promise<AuthResult> => {
     if (!session?.token) return { ok: false, error: 'Sign in first.' };
     try {
-      // Make sure this browser is actually subscribed before asking for a test.
+      // Make sure this device is actually subscribed before asking for a test.
       if (isWebPushSupported()) {
         const result = await enableWebPush(session.token);
         if (!result.ok) {
           return { ok: false, error: result.reason === 'denied' ? 'Allow notifications in your browser first.' : 'Push is not available here.' };
+        }
+      } else if (isNativePushSupported()) {
+        const result = await enableNativePush(session.token);
+        if (!result.ok) {
+          const reason =
+            result.reason === 'denied' ? 'Allow notifications for Wingman first.'
+            : result.reason === 'no-device' ? 'Push needs a real device (not a simulator).'
+            : result.reason === 'no-project' ? 'Push needs an EAS project configured in the build.'
+            : 'Push is not available here.';
+          return { ok: false, error: reason };
         }
       }
       await sendTestPush(session.token);
@@ -607,7 +675,7 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     setQuietHours,
     updateProfile,
     sendTestNotification,
-    pushSupported: isWebPushSupported(),
+    pushSupported: isWebPushSupported() || isNativePushSupported(),
     setChatMessages,
     streamChatMessage,
     clearChatThread,
