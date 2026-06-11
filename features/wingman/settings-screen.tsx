@@ -1,6 +1,5 @@
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import * as WebBrowser from 'expo-web-browser';
 import React from 'react';
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -95,14 +94,6 @@ export function SettingsScreen() {
       notify('Could not send', result.error ?? 'Push is not available here.');
     }
   }, [sendTestNotification]);
-
-  const openLink = React.useCallback(async (url: string) => {
-    try {
-      await WebBrowser.openBrowserAsync(url);
-    } catch {
-      Linking.openURL(url).catch(() => notify('Could not open link.'));
-    }
-  }, []);
 
   const onDeleteAccount = React.useCallback(() => {
     void (async () => {

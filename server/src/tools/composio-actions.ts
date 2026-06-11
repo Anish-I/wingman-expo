@@ -25,6 +25,8 @@ type AppActionConfig = {
   /** Short activity-log title + how to summarize the result for the user. */
   activityTitle: string;
   activityColor: string;
+  /** Pip variant to show in the activity feed (must be a real pip asset). */
+  activityPip: string;
   summarize: (args: Record<string, unknown>, output: string) => string;
 };
 
@@ -83,7 +85,7 @@ async function runAppAction(
   await ctx.store.addActivity(ctx.userId, {
     title: cfg.activityTitle,
     subtitle: clip(cfg.summarize(args, output), 60),
-    pip: 'sparkle',
+    pip: cfg.activityPip,
     color: cfg.activityColor,
   });
 
@@ -122,6 +124,7 @@ export const gmailSendEmail: ServerTool = {
         }),
         activityTitle: 'Sent an email',
         activityColor: '#EA4335',
+        activityPip: 'wave',
         summarize: (a) => `Emailed ${str(a.to) || 'recipient'}${str(a.subject) ? ` · ${str(a.subject)}` : ''}.`,
       },
       args,
@@ -154,6 +157,7 @@ export const gmailSummarizeInbox: ServerTool = {
         }),
         activityTitle: 'Checked Gmail',
         activityColor: '#EA4335',
+        activityPip: 'thinking',
         summarize: (_a, output) => `Inbox: ${clip(output)}`,
       },
       args,
@@ -190,6 +194,7 @@ export const slackSendMessage: ServerTool = {
         }),
         activityTitle: 'Posted to Slack',
         activityColor: '#4A154B',
+        activityPip: 'cool',
         summarize: (a) => `Posted to ${str(a.channel) || 'Slack'}.`,
       },
       args,
@@ -227,6 +232,7 @@ export const spotifyPlay: ServerTool = {
         }),
         activityTitle: 'Started Spotify',
         activityColor: '#1DB954',
+        activityPip: 'headband',
         summarize: (a) => `Playing "${str(a.query)}" on Spotify.`,
       },
       args,

@@ -113,9 +113,11 @@ export function Pip({
   size?: number;
   style?: ImageStyle;
 }) {
+  // Fall back to 'happy' for any unknown variant so a bad/stale value from the
+  // server never renders as a blank circle.
   return (
     <Image
-      source={pipAssets[variant]}
+      source={pipAssets[variant] ?? pipAssets.happy}
       contentFit="contain"
       style={[
         {

@@ -391,7 +391,10 @@ export function FlowsScreen() {
 
   const handleToggleFlow = React.useCallback((id: string, next: boolean) => {
     void toggleFlow(id, next);
-    if (next) pipPlay('clap', { say: 'On it! 🪶' });
+    // Pip reacts to both directions: pumped when a flow goes live, dozing when
+    // it's paused.
+    if (next) pipPlay('excited', { say: 'On it! 🪶' });
+    else pipPlay('sleeping', { say: 'Resting 😴' });
   }, [pipPlay, toggleFlow]);
 
   const handleDeleteFlow = React.useCallback((id: string, title: string) => {
@@ -409,8 +412,9 @@ export function FlowsScreen() {
         // Haptics are best-effort.
       }
       void deleteFlow(id);
+      pipPlay('wave', { say: 'Bye, flow 👋' });
     })();
-  }, [deleteFlow]);
+  }, [deleteFlow, pipPlay]);
 
   const totalRuns = flows.reduce((sum, flow) => sum + flow.runs, 0);
   const pausedCount = flows.length - activeFlowsCount;

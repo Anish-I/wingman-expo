@@ -191,7 +191,7 @@ export const remember: ServerTool = {
     await ctx.store.addActivity(ctx.userId, {
       title: 'Remembered something',
       subtitle: note.length > 60 ? `${note.slice(0, 57)}…` : note,
-      pip: 'sparkle',
+      pip: 'love',
       color: '#8B7CF6',
     });
     return { output: `Got it — I'll remember that: ${note}`, meta: { kind: 'memory_saved', note } };

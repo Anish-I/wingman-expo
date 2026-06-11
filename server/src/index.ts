@@ -652,10 +652,18 @@ app.delete('/flows/:id', async (request, reply) => {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   const params = z.object({ id: z.string() }).parse(request.params);
+  // Grab the flow first so the activity log can name it after it's gone.
+  const flow = await store.getFlowById(params.id, user.id);
   const deleted = await store.deleteFlow(params.id, user.id);
   if (!deleted) {
     return reply.status(404).send({ error: 'Flow not found.' });
   }
+  await store.addActivity(user.id, {
+    title: 'Deleted flow',
+    subtitle: flow?.title ?? 'A flow',
+    pip: 'wave',
+    color: '#8892BC',
+  });
   return reply.send({ ok: true });
 });
 
@@ -703,7 +711,7 @@ app.patch('/flows/:id', async (request, reply) => {
   await store.addActivity(user.id, {
     title: payload.active ? 'Enabled flow' : 'Paused flow',
     subtitle: flow.title,
-    pip: payload.active ? 'clap' : 'sad',
+    pip: payload.active ? 'excited' : 'sleeping',
     color: payload.active ? '#3B82F6' : '#8892BC',
   });
   return reply.send({ flow });
