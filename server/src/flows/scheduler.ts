@@ -1,5 +1,6 @@
 import type { PgStore } from '../store.js';
 import type { ComposioRuntime } from '../tools/composio.js';
+import type { Notifier } from '../push/notifier.js';
 import { buildRegistry } from '../tools/registry.js';
 import { isDue } from './schedule.js';
 import { runFlowDefinition } from './runner.js';
@@ -41,6 +42,7 @@ export async function runDueFlows(
   store: PgStore,
   composio: ComposioRuntime,
   now: Date = new Date(),
+  notifier?: Notifier,
 ): Promise<number> {
   const flows = await store.getActiveScheduledFlows();
   let ran = 0;
@@ -74,6 +76,12 @@ export async function runDueFlows(
           color: '#EF4444',
         });
       }
+      // Notify the flow's owner (gated by their push + quiet-hours settings).
+      await notifier?.notify(store, flow.userId, {
+        title: result.ok ? `${flow.emoji} ${flow.title}` : 'Flow failed',
+        body: result.ok ? 'Your scheduled flow just ran.' : `${flow.title}: ${result.error ?? 'unknown error'}`,
+        url: '/flows',
+      }).catch(() => {});
     } catch (err) {
       // Never let one flow's failure break the tick.
       await store
@@ -90,9 +98,9 @@ export async function runDueFlows(
   return ran;
 }
 
-export function startScheduler(store: PgStore, composio: ComposioRuntime): Scheduler {
+export function startScheduler(store: PgStore, composio: ComposioRuntime, notifier?: Notifier): Scheduler {
   const timer = setInterval(() => {
-    void runDueFlows(store, composio).catch((err) => {
+    void runDueFlows(store, composio, new Date(), notifier).catch((err) => {
       console.warn('[scheduler] tick failed:', (err as Error).message);
     });
   }, TICK_MS);

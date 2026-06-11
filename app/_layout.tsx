@@ -135,6 +135,7 @@ function RootLayoutNav() {
         <Stack.Screen name="ui-critique" />
         <Stack.Screen name="apps" />
         <Stack.Screen name="flow-builder" />
+        <Stack.Screen name="edit-profile" />
         <Stack.Screen name="(tabs)" />
       </Stack>
           <GlobalPip />

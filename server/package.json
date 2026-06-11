@@ -25,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.15.30",
     "@types/pg": "^8.11.10",
+    "@types/web-push": "^3.6.4",
     "tsx": "^4.21.0",
     "typescript": "^5.9.2"
   }

@@ -14,6 +14,7 @@ import { buildRegistry } from './tools/registry.js';
 import { openSSE } from './chat/sse.js';
 import { runChatTurn } from './chat/orchestrator.js';
 import { startScheduler, runDueFlows } from './flows/scheduler.js';
+import { createNotifier } from './push/notifier.js';
 import { runFlowDefinition, validateSteps } from './flows/runner.js';
 import { builtinTools } from './tools/builtin.js';
 import type { ChatEvent } from './llm/types.js';
@@ -38,6 +39,9 @@ const env = z.object({
   SUPABASE_URL: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().optional(),
 }).parse(process.env);
 
 // Public base URL of this API (used to build OAuth callback URLs the browser hits).
@@ -65,6 +69,11 @@ const DEMO_EMAIL = 'sam@wingman.dev';
 const composioRuntime = createComposioRuntime({
   COMPOSIO_API_KEY: env.COMPOSIO_API_KEY,
   COMPOSIO_AUTH_CONFIGS: env.COMPOSIO_AUTH_CONFIGS,
+});
+const notifier = createNotifier({
+  VAPID_PUBLIC_KEY: env.VAPID_PUBLIC_KEY,
+  VAPID_PRIVATE_KEY: env.VAPID_PRIVATE_KEY,
+  VAPID_SUBJECT: env.VAPID_SUBJECT,
 });
 
 const authPayloadSchema = z.object({
@@ -277,6 +286,103 @@ app.get('/me', async (request, reply) => {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   return reply.send({ user });
+});
+
+// Edit the profile fields the user owns (name + phone). Scoped to the caller's
+// verified id — there is no way to target another user's row.
+const updateProfileSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  // Allow clearing the phone (empty string) or setting a reasonable value.
+  phone: z.string().trim().max(40).optional(),
+});
+
+app.patch('/me', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const input = updateProfileSchema.parse(request.body);
+  const updated = await store.updateProfile(user.id, input);
+  if (!updated) {
+    return reply.status(404).send({ error: 'User not found.' });
+  }
+  return reply.send({ user: updated });
+});
+
+app.get('/settings', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  return reply.send({ settings: await store.getSettings(user.id) });
+});
+
+const updateSettingsSchema = z.object({
+  pushEnabled: z.boolean().optional(),
+  quietHours: z.string().max(40).optional(),
+  memoryEnabled: z.boolean().optional(),
+});
+
+app.put('/settings', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const input = updateSettingsSchema.parse(request.body);
+  return reply.send({ settings: await store.updateSettings(user.id, input) });
+});
+
+// The non-secret VAPID public key the browser needs to create a Web Push
+// subscription. Empty string when web push isn't configured (client then skips).
+app.get('/push/vapid-key', async (_request, reply) => {
+  return reply.send({ key: notifier.vapidPublicKey ?? '' });
+});
+
+const pushSubscribeSchema = z.object({
+  platform: z.enum(['web', 'ios', 'android']),
+  endpoint: z.string().optional(),
+  keys: z.object({ p256dh: z.string().optional(), auth: z.string().optional() }).optional(),
+  expoToken: z.string().optional(),
+});
+
+app.post('/push/subscribe', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const input = pushSubscribeSchema.parse(request.body);
+  await store.savePushSubscription(user.id, input);
+  return reply.status(201).send({ ok: true });
+});
+
+const pushUnsubscribeSchema = z.object({
+  endpoint: z.string().optional(),
+  expoToken: z.string().optional(),
+});
+
+app.post('/push/unsubscribe', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const input = pushUnsubscribeSchema.parse(request.body);
+  await store.deletePushSubscription(user.id, input);
+  return reply.send({ ok: true });
+});
+
+// Send a test push to the caller's own devices — proves the round-trip works
+// and lets the Settings screen confirm delivery. Respects pushEnabled/quietHours.
+app.post('/push/test', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  await notifier.notify(store, user.id, {
+    title: 'Wingman',
+    body: "🕊️ Pip here — push notifications are working.",
+    url: '/',
+  });
+  return reply.send({ ok: true });
 });
 
 app.get('/apps', async (request, reply) => {
@@ -550,6 +656,12 @@ app.post('/flows/:id/run', async (request, reply) => {
     pip: result.ok ? 'clap' : 'sad',
     color: result.ok ? flow.color : '#EF4444',
   });
+  // Real push to the owner's devices (gated by their push + quiet-hours settings).
+  await notifier.notify(store, user.id, {
+    title: result.ok ? `${flow.emoji} ${flow.title}` : 'Flow failed',
+    body: result.ok ? 'Your flow just ran.' : `${flow.title}: ${result.error ?? 'unknown error'}`,
+    url: '/flows',
+  }).catch(() => {});
   return reply.send({ result });
 });
 
@@ -587,7 +699,7 @@ app.post('/dev/ui-critique', async (request, reply) => {
 });
 
 // Start the flow scheduler (once-a-minute tick; runs due flows).
-const scheduler = startScheduler(store, composioRuntime);
+const scheduler = startScheduler(store, composioRuntime, notifier);
 app.addHook('onClose', async () => {
   scheduler.stop();
 });

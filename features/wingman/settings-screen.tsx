@@ -36,8 +36,20 @@ export function SettingsScreen() {
     setThemeMode,
     themeMode,
     deleteAccount,
+    sendTestNotification,
+    pushSupported,
     signOut,
   } = useWingman();
+
+  const onSendTest = React.useCallback(async () => {
+    await Haptics.selectionAsync();
+    const result = await sendTestNotification();
+    if (result.ok) {
+      Alert.alert('Sent', 'A test notification is on its way to this device.');
+    } else {
+      Alert.alert('Could not send', result.error ?? 'Push is not available here.');
+    }
+  }, [sendTestNotification]);
 
   const openLink = React.useCallback(async (url: string) => {
     try {
@@ -111,6 +123,10 @@ export function SettingsScreen() {
       <ScreenHeader title="Settings" />
 
       <Animated.View entering={FadeInDown.duration(380).springify().damping(18)}>
+      <Pressable
+        onPress={() => router.push('/edit-profile' as never)}
+        accessibilityRole="button"
+        accessibilityLabel="Edit profile">
       <StickerCard
         backgroundColor={isDark ? colors.cardAlt : colors.card}
         borderColor={isDark ? colors.borderStrong : colors.sky200}
@@ -163,6 +179,7 @@ export function SettingsScreen() {
         </View>
         <IconGlyph name="chevron-right" color={colors.fgSecondary} size={18} />
       </StickerCard>
+      </Pressable>
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(60).duration(380).springify().damping(18)}>
@@ -190,6 +207,17 @@ export function SettingsScreen() {
             void cycleQuietHours();
           }}
         />
+        {settings.pushEnabled ? (
+          <SettingsRow
+            icon="notifications"
+            label="Send a test notification"
+            color={colors.mint500}
+            value={pushSupported ? undefined : 'Web only'}
+            onPress={() => {
+              void onSendTest();
+            }}
+          />
+        ) : null}
       </SectionGroup>
       </Animated.View>
 

@@ -99,6 +99,43 @@ export async function fetchMe(token: string) {
   return requestJson<{ user: AuthSession['user'] }>('/me', { token });
 }
 
+export async function updateProfile(token: string, input: { name?: string; phone?: string }) {
+  return requestJson<{ user: AuthSession['user'] }>('/me', { method: 'PATCH', token, body: input });
+}
+
+export type WingmanSettings = {
+  pushEnabled: boolean;
+  quietHours: string;
+  memoryEnabled: boolean;
+};
+
+export async function fetchSettings(token: string) {
+  return requestJson<{ settings: WingmanSettings }>('/settings', { token });
+}
+
+export async function updateSettingsRequest(token: string, input: Partial<WingmanSettings>) {
+  return requestJson<{ settings: WingmanSettings }>('/settings', { method: 'PUT', token, body: input });
+}
+
+export async function fetchVapidKey() {
+  return requestJson<{ key: string }>('/push/vapid-key');
+}
+
+export async function subscribePush(
+  token: string,
+  input: { platform: 'web' | 'ios' | 'android'; endpoint?: string; keys?: { p256dh?: string; auth?: string }; expoToken?: string },
+) {
+  return requestJson<{ ok: boolean }>('/push/subscribe', { method: 'POST', token, body: input });
+}
+
+export async function unsubscribePush(token: string, input: { endpoint?: string; expoToken?: string }) {
+  return requestJson<{ ok: boolean }>('/push/unsubscribe', { method: 'POST', token, body: input });
+}
+
+export async function sendTestPush(token: string) {
+  return requestJson<{ ok: boolean }>('/push/test', { method: 'POST', token });
+}
+
 export async function fetchApps(token: string) {
   return requestJson<{ totalAvailable: number; items: AppIntegration[] }>('/apps', { token });
 }

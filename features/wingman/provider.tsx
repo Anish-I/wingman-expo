@@ -15,13 +15,18 @@ import {
   fetchFlow,
   fetchFlows,
   fetchMe,
+  fetchSettings,
   patchFlow,
   runFlow as runFlowRequest,
   runUiCritique,
   sendChat,
   sendChatStream,
+  sendTestPush,
   updateFlow as updateFlowRequest,
+  updateProfile as updateProfileRequest,
+  updateSettingsRequest,
 } from '@/features/wingman/api';
+import { disableWebPush, enableWebPush, isWebPushSupported } from '@/features/wingman/push-web';
 import {
   type AppIntegration,
   type AuthSession,
@@ -86,9 +91,13 @@ type WingmanContextValue = {
   updateFlow: (id: string, input: FlowUpdateInput) => Promise<FlowItem | null>;
   runFlow: (id: string) => Promise<FlowRunResult | null>;
   toggleFlow: (id: string, nextValue: boolean) => Promise<void>;
-  setPushEnabled: (value: boolean) => void;
-  setMemoryEnabled: (value: boolean) => void;
-  setQuietHours: (value: string) => void;
+  setPushEnabled: (value: boolean) => Promise<void>;
+  setMemoryEnabled: (value: boolean) => Promise<void>;
+  setQuietHours: (value: string) => Promise<void>;
+  updateProfile: (input: { name?: string; phone?: string }) => Promise<AuthResult>;
+  sendTestNotification: () => Promise<AuthResult>;
+  /** True when push delivery can work on this platform (web push supported). */
+  pushSupported: boolean;
   setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   streamChatMessage: (message: string) => Promise<AuthResult>;
   clearChatThread: () => Promise<void>;
@@ -213,12 +222,13 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     }
     setDataLoading(true);
     try {
-      const [meResponse, appsResponse, flowsResponse, activityResponse, briefingResponse] = await Promise.all([
+      const [meResponse, appsResponse, flowsResponse, activityResponse, briefingResponse, settingsResponse] = await Promise.all([
         fetchMe(session.token),
         fetchApps(session.token),
         fetchFlows(session.token),
         fetchActivity(session.token),
         fetchBriefing(session.token),
+        fetchSettings(session.token),
       ]);
 
       setCurrentUser(meResponse.user);
@@ -226,6 +236,7 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
       setFlows(flowsResponse.items);
       setEvents(activityResponse.items);
       setBriefing(briefingResponse);
+      setSettings(settingsResponse.settings);
       setDataError(null);
     } catch (error) {
       if (error instanceof Error && error.message === 'Unauthorized') {
@@ -474,6 +485,79 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     clearSession();
   }, [clearSession, session?.token]);
 
+  // --- settings: optimistic local update, then persist to the backend ---
+  const persistSettings = React.useCallback(async (patch: Partial<WingmanSettings>) => {
+    if (!session?.token) return;
+    const previous = settings;
+    setSettings((current) => ({ ...current, ...patch }));
+    try {
+      const { settings: saved } = await updateSettingsRequest(session.token, patch);
+      setSettings(saved);
+    } catch (error) {
+      // Roll back on failure so the toggle reflects the true persisted state.
+      setSettings(previous);
+      if (error instanceof Error && error.message === 'Unauthorized') clearSession();
+    }
+  }, [clearSession, session?.token, settings]);
+
+  const setPushEnabled = React.useCallback(async (value: boolean) => {
+    // Turning push ON registers this browser for Web Push first; if the user
+    // denies permission we don't flip the stored setting to a lie.
+    if (value && isWebPushSupported() && session?.token) {
+      const result = await enableWebPush(session.token);
+      if (!result.ok) {
+        // Surface nothing here; the screen reads pushSupported/permission to explain.
+        return;
+      }
+    }
+    if (!value && isWebPushSupported() && session?.token) {
+      await disableWebPush(session.token);
+    }
+    await persistSettings({ pushEnabled: value });
+  }, [persistSettings, session?.token]);
+
+  const setMemoryEnabled = React.useCallback(async (value: boolean) => {
+    await persistSettings({ memoryEnabled: value });
+  }, [persistSettings]);
+
+  const setQuietHours = React.useCallback(async (value: string) => {
+    await persistSettings({ quietHours: value });
+  }, [persistSettings]);
+
+  const updateProfile = React.useCallback(async (input: { name?: string; phone?: string }): Promise<AuthResult> => {
+    if (!session?.token) return { ok: false, error: 'Sign in first.' };
+    try {
+      const { user } = await updateProfileRequest(session.token, input);
+      setCurrentUser(user);
+      setSession((current) => (current ? { ...current, user } : current));
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Unauthorized') {
+        clearSession();
+        return { ok: false, error: 'Session expired.' };
+      }
+      return { ok: false, error: error instanceof Error ? error.message : 'Could not save.' };
+    }
+  }, [clearSession, session?.token]);
+
+  const sendTestNotification = React.useCallback(async (): Promise<AuthResult> => {
+    if (!session?.token) return { ok: false, error: 'Sign in first.' };
+    try {
+      // Make sure this browser is actually subscribed before asking for a test.
+      if (isWebPushSupported()) {
+        const result = await enableWebPush(session.token);
+        if (!result.ok) {
+          return { ok: false, error: result.reason === 'denied' ? 'Allow notifications in your browser first.' : 'Push is not available here.' };
+        }
+      }
+      await sendTestPush(session.token);
+      return { ok: true };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Unauthorized') clearSession();
+      return { ok: false, error: error instanceof Error ? error.message : 'Could not send.' };
+    }
+  }, [clearSession, session?.token]);
+
   const critiqueUi = React.useCallback(async (payload: { screenId: string; theme: string; viewport: { width: number; height: number } }) => {
     if (!session?.token) {
       throw new Error('Sign in first.');
@@ -518,9 +602,12 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     updateFlow,
     runFlow,
     toggleFlow,
-    setPushEnabled: (value) => setSettings((currentSettings) => ({ ...currentSettings, pushEnabled: value })),
-    setMemoryEnabled: (value) => setSettings((currentSettings) => ({ ...currentSettings, memoryEnabled: value })),
-    setQuietHours: (value) => setSettings((currentSettings) => ({ ...currentSettings, quietHours: value })),
+    setPushEnabled,
+    setMemoryEnabled,
+    setQuietHours,
+    updateProfile,
+    sendTestNotification,
+    pushSupported: isWebPushSupported(),
     setChatMessages,
     streamChatMessage,
     clearChatThread,

@@ -333,9 +333,10 @@ export class PgStore {
     if (sub.platform === 'web') {
       if (!sub.endpoint) return;
       await this.pool.query(
+        // The WHERE predicate matches the partial unique index on endpoint.
         `INSERT INTO push_subscriptions (id, user_id, platform, endpoint, keys_p256dh, keys_auth, created_at)
          VALUES ($1,$2,'web',$3,$4,$5,$6)
-         ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id,
+         ON CONFLICT (endpoint) WHERE endpoint IS NOT NULL DO UPDATE SET user_id = EXCLUDED.user_id,
            keys_p256dh = EXCLUDED.keys_p256dh, keys_auth = EXCLUDED.keys_auth`,
         [randomId('push'), userId, sub.endpoint, sub.keys?.p256dh ?? null, sub.keys?.auth ?? null, nowIso()],
       );
@@ -344,7 +345,7 @@ export class PgStore {
       await this.pool.query(
         `INSERT INTO push_subscriptions (id, user_id, platform, expo_token, created_at)
          VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT (expo_token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform`,
+         ON CONFLICT (expo_token) WHERE expo_token IS NOT NULL DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform`,
         [randomId('push'), userId, sub.platform, sub.expoToken, nowIso()],
       );
     }
