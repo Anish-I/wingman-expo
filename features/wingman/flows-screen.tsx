@@ -401,11 +401,26 @@ export function FlowsScreen() {
     setGenBusy(true);
     setGenError(null);
     try {
-      const flow = await generateFlow(prompt);
-      if (flow) {
+      const result = await generateFlow(prompt);
+      if (result) {
         setGenOpen(false);
         setGenPrompt('');
-        pipPlay('excited', { say: 'New flow! 🪶' });
+        if (result.note) {
+          // Flow was saved paused (e.g. a missing recipient email it wouldn't guess).
+          // Tell the user what's needed and offer to jump into the builder to finish it.
+          pipPlay('thinking', { say: 'Almost there…' });
+          const open = await confirmAction({
+            title: 'Saved — needs a detail',
+            message: result.note,
+            confirmLabel: 'Open flow',
+            cancelLabel: 'Later',
+          });
+          if (open) {
+            router.push(`/flow-builder?flowId=${encodeURIComponent(result.flow.id)}` as never);
+          }
+        } else {
+          pipPlay('excited', { say: 'New flow! 🪶' });
+        }
       } else {
         setGenError('Could not create a flow. Try rewording it.');
       }
@@ -414,7 +429,7 @@ export function FlowsScreen() {
     } finally {
       setGenBusy(false);
     }
-  }, [genPrompt, genBusy, generateFlow, pipPlay]);
+  }, [genPrompt, genBusy, generateFlow, pipPlay, router]);
 
   const handleToggleFlow = React.useCallback((id: string, next: boolean) => {
     void toggleFlow(id, next);

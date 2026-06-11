@@ -737,10 +737,27 @@ app.post('/flows/generate', async (request, reply) => {
   const { prompt } = z.object({ prompt: z.string().min(1) }).parse(request.body);
   const ctx = { userId: user.id, store, composio: composioRuntime, llm: llmProvider };
 
+  // Give the model the user's real "now" so relative timing ("in 2 hours",
+  // "tonight") resolves correctly instead of echoing the literal hour.
+  const settings = await store.getSettings(user.id);
+  const tz = settings.timezone || 'UTC';
+  const localNow = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    weekday: 'long',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date());
+
   const system =
     'You build a single automation (flow) for the user by calling the create_flow tool exactly once. ' +
-    'Choose steps only from the catalog in the tool description. If the user implies timing, set a sensible ' +
-    'schedule; otherwise use null (manual). Always call create_flow — never reply with plain text.';
+    `The user's current local time is ${localNow} (${tz}). For relative timing like "in 2 hours", "tonight", ` +
+    'or "tomorrow morning", compute the clock time from that. Schedules are RECURRING (they repeat at the given ' +
+    'time) — there is no one-shot timer, so a relative request becomes a daily schedule at the computed time. ' +
+    'Choose steps only from the catalog in the tool description. Never invent values you were not given — ' +
+    'especially email addresses, phone numbers, or channel names; leave a missing required value blank and the ' +
+    'flow will be saved paused for the user to complete. If the user implies no timing, use null (manual). ' +
+    'Always call create_flow — never reply with plain text.';
 
   let toolCall: ToolCall | null = null;
   for await (const chunk of llmProvider.stream({
@@ -767,7 +784,7 @@ app.post('/flows/generate', async (request, reply) => {
     return reply.status(422).send({ error: result.output });
   }
   const flow = await store.getFlowById(result.meta.flowId, user.id);
-  return reply.status(201).send({ flow });
+  return reply.status(201).send({ flow, note: result.meta.note ?? null });
 });
 
 app.post('/dev/ui-critique', async (request, reply) => {

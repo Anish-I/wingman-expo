@@ -222,7 +222,7 @@ export async function fetchFlowCatalog(token: string) {
  *  Backed by a live LLM turn, so it gets a generous timeout (the 4.5s default
  *  would abort mid-generation even though the flow still gets created). */
 export async function generateFlow(token: string, prompt: string) {
-  return requestJson<{ flow: FlowItem }>('/flows/generate', {
+  return requestJson<{ flow: FlowItem; note: string | null }>('/flows/generate', {
     method: 'POST',
     token,
     body: { prompt },

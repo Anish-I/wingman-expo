@@ -108,7 +108,7 @@ type WingmanContextValue = {
   refreshData: () => Promise<void>;
   setThemeMode: (mode: ThemeMode) => void;
   createFlow: () => Promise<FlowItem | null>;
-  generateFlow: (prompt: string) => Promise<FlowItem | null>;
+  generateFlow: (prompt: string) => Promise<{ flow: FlowItem; note: string | null } | null>;
   getFlowCatalog: () => Promise<CatalogNode[]>;
   getFlowDetail: (id: string) => Promise<FlowDetail | null>;
   updateFlow: (id: string, input: FlowUpdateInput) => Promise<FlowItem | null>;
@@ -424,7 +424,7 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clearSession, session?.token]);
 
-  const generateFlow = React.useCallback(async (prompt: string): Promise<FlowItem | null> => {
+  const generateFlow = React.useCallback(async (prompt: string): Promise<{ flow: FlowItem; note: string | null } | null> => {
     if (!session?.token) {
       return null;
     }
@@ -433,7 +433,7 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
       setFlows((currentFlows) => [response.flow, ...currentFlows]);
       const activityResponse = await fetchActivity(session.token);
       setEvents(activityResponse.items);
-      return response.flow;
+      return { flow: response.flow, note: response.note ?? null };
     } catch (error) {
       if (error instanceof Error && error.message === 'Unauthorized') {
         clearSession();
