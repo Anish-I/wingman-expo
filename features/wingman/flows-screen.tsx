@@ -2,7 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
-import { Alert, type GestureResponderEvent, Pressable, ScrollView, Text, View } from 'react-native';
+import { type GestureResponderEvent, Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -14,6 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { confirmAction } from '@/features/wingman/confirm';
 import { useWingman } from '@/features/wingman/provider';
 import { usePipController } from '@/features/wingman/pip-controller';
 import {
@@ -394,25 +395,21 @@ export function FlowsScreen() {
   }, [pipPlay, toggleFlow]);
 
   const handleDeleteFlow = React.useCallback((id: string, title: string) => {
-    Alert.alert(
-      'Delete this flow?',
-      `“${title}” will be removed and stop running. This can't be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            } catch {
-              // Haptics are best-effort.
-            }
-            void deleteFlow(id);
-          },
-        },
-      ],
-    );
+    void (async () => {
+      const ok = await confirmAction({
+        title: 'Delete this flow?',
+        message: `“${title}” will be removed and stop running. This can't be undone.`,
+        confirmLabel: 'Delete',
+        destructive: true,
+      });
+      if (!ok) return;
+      try {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      } catch {
+        // Haptics are best-effort.
+      }
+      void deleteFlow(id);
+    })();
   }, [deleteFlow]);
 
   const totalRuns = flows.reduce((sum, flow) => sum + flow.runs, 0);

@@ -2,7 +2,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -18,6 +17,7 @@ import {
   type FlowSchedule,
   type FlowStep,
 } from '@/features/wingman/data';
+import { confirmAction } from '@/features/wingman/confirm';
 import { useWingman } from '@/features/wingman/provider';
 import { IconGlyph, WingmanLabel } from '@/features/wingman/primitives';
 import {
@@ -666,30 +666,26 @@ export function FlowBuilderScreen() {
   const isRealFlow = flows.some((item) => item.id === flow.id);
 
   const handleDelete = React.useCallback(() => {
-    Alert.alert(
-      'Delete this flow?',
-      `“${title || flow.title}” will be removed and stop running. This can't be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            } catch {
-              // Haptics are best-effort.
-            }
-            const ok = await deleteFlow(flow.id);
-            if (ok) {
-              router.back();
-            } else {
-              setStatus({ tone: 'error', text: 'Could not delete this flow. Try again.' });
-            }
-          },
-        },
-      ],
-    );
+    void (async () => {
+      const confirmed = await confirmAction({
+        title: 'Delete this flow?',
+        message: `“${title || flow.title}” will be removed and stop running. This can't be undone.`,
+        confirmLabel: 'Delete',
+        destructive: true,
+      });
+      if (!confirmed) return;
+      try {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      } catch {
+        // Haptics are best-effort.
+      }
+      const ok = await deleteFlow(flow.id);
+      if (ok) {
+        router.back();
+      } else {
+        setStatus({ tone: 'error', text: 'Could not delete this flow. Try again.' });
+      }
+    })();
   }, [deleteFlow, flow.id, flow.title, router, title]);
 
   return (
