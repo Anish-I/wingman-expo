@@ -206,7 +206,7 @@ export type OnboardingScene = {
   chips?: string[];
   sample?: string;
   reply?: string;
-  apps?: { name: string; emoji: string; color: string }[];
+  apps?: { name: string; emoji: string; color: string; icon?: string }[];
   flows?: { emoji: string; title: string; time: string }[];
   points?: { icon: string; label: string }[];
 };
@@ -240,14 +240,14 @@ export const onboardingScenes: OnboardingScene[] = [
     pip: 'business',
     eyebrow: '1,000+ apps wired in',
     title: 'Connect once. Use everywhere.',
-    body: "Gmail, Calendar, Notion, Spotify, and a thousand more. I plug into them so you don't have to.",
+    body: "Gmail, Calendar, Slack, Spotify, and a thousand more. I plug into them so you don't have to.",
     bg: palette.lav100,
     accent: palette.lav500,
     apps: [
-      { name: 'Gmail', emoji: '📧', color: '#EA4335' },
-      { name: 'Calendar', emoji: '📆', color: '#F5A623' },
-      { name: 'Notion', emoji: '📝', color: '#1B2240' },
-      { name: 'Spotify', emoji: '🎵', color: '#1DB954' },
+      { name: 'Gmail', emoji: '📧', color: '#EA4335', icon: 'gmail' },
+      { name: 'Calendar', emoji: '📆', color: '#4285F4', icon: 'calendar-month' },
+      { name: 'Slack', emoji: '💬', color: '#611F69', icon: 'slack' },
+      { name: 'Spotify', emoji: '🎵', color: '#1DB954', icon: 'spotify' },
     ],
   },
   {

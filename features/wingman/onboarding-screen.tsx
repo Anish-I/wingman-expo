@@ -1,3 +1,4 @@
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import React from 'react';
@@ -85,7 +86,7 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
                 style={{
                   color: colors.ink,
                   fontFamily: wingmanFonts.text,
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: '800',
                 }}>
                 {chip}
@@ -108,9 +109,9 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
             paddingVertical: 12,
             borderRadius: 20,
             borderBottomRightRadius: 6,
-            backgroundColor: colors.sky500,
+            backgroundColor: colors.sky700,
             borderWidth: 1.5,
-            borderColor: colors.sky700,
+            borderColor: '#1E40AF',
             boxShadow: '0 4px 0 rgba(29, 78, 216, 0.20), 0 10px 24px rgba(59, 130, 246, 0.34)',
             borderCurve: 'continuous',
           }}>
@@ -175,13 +176,21 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
                 justifyContent: 'center',
                 borderCurve: 'continuous',
               }}>
-              <Text style={{ fontSize: 20 }}>{app.emoji}</Text>
+              {app.icon ? (
+                <MaterialCommunityIcons
+                  name={app.icon as React.ComponentProps<typeof MaterialCommunityIcons>['name']}
+                  size={22}
+                  color={app.color}
+                />
+              ) : (
+                <Text style={{ fontSize: 20 }}>{app.emoji}</Text>
+              )}
             </View>
             <Text
               style={{
                 color: colors.ink,
                 fontFamily: wingmanFonts.text,
-                fontSize: 12,
+                fontSize: 14,
                 fontWeight: '800',
               }}>
               {app.name}
@@ -206,7 +215,20 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
               gap: 12,
               borderColor: colors.ink,
             }}>
-            <Text style={{ fontSize: 22 }}>{flow.emoji}</Text>
+            <View
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 12,
+                borderWidth: 1.5,
+                borderColor: withAlpha(scene.accent, 0.4),
+                backgroundColor: withAlpha(scene.accent, 0.12),
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderCurve: 'continuous',
+              }}>
+              <Text style={{ fontSize: 19 }}>{flow.emoji}</Text>
+            </View>
             <View style={{ flex: 1 }}>
               <Text
                 style={{
@@ -251,9 +273,9 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
             }}>
             <View
               style={{
-                width: 42,
-                height: 42,
-                borderRadius: 14,
+                width: 40,
+                height: 40,
+                borderRadius: 12,
                 borderWidth: 1.5,
                 borderColor: colors.mint500,
                 backgroundColor: colors.mint100,
@@ -267,7 +289,7 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
               style={{
                 color: colors.ink,
                 fontFamily: wingmanFonts.text,
-                fontSize: 15,
+                fontSize: 14,
                 fontWeight: '800',
                 flex: 1,
               }}>
@@ -289,9 +311,9 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
               }}>
               <View
                 style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 10,
+                  width: 40,
+                  height: 40,
+                  borderRadius: 12,
                   borderWidth: 1.5,
                   borderColor: colors.mint500,
                   backgroundColor: colors.mint100,
@@ -299,15 +321,15 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
                   justifyContent: 'center',
                   borderCurve: 'continuous',
                 }}>
-                <IconGlyph name={point.icon as 'lock-closed'} color={colors.mint500} size={17} />
+                <IconGlyph name={point.icon as 'lock-closed'} color={colors.mint500} size={19} />
               </View>
               <Text
                 style={{
                   color: colors.ink,
                   fontFamily: wingmanFonts.text,
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: '800',
-                  lineHeight: 18,
+                  lineHeight: 19,
                 }}>
                 {point.label}
               </Text>
@@ -342,7 +364,9 @@ function SceneBody({
   return (
     <RNAnimated.View style={[{ gap: 14 }, containerStyle]}>
       <RNAnimated.View entering={FadeInDown.duration(240)}>
-        <WingmanLabel color={scene.accent}>{scene.eyebrow}</WingmanLabel>
+        <WingmanLabel color={scene.accent} textColor="#3D4566">
+          {scene.eyebrow}
+        </WingmanLabel>
       </RNAnimated.View>
       <RNAnimated.View entering={FadeInDown.delay(60).duration(280)}>
         <Text
@@ -603,10 +627,10 @@ export function OnboardingScreen() {
         key={currentScene.id}
         style={{
           height: sceneHeight,
-          paddingTop: insets.top + 74,
+          paddingTop: insets.top + 104,
           paddingBottom: 132,
           paddingHorizontal: wingmanLayout.screenPadding,
-          justifyContent: 'center',
+          justifyContent: 'flex-start',
           backgroundColor: currentScene.bg,
         }}>
         <RNAnimated.View
@@ -615,34 +639,6 @@ export function OnboardingScreen() {
           <SceneBody scene={currentScene} active />
         </RNAnimated.View>
       </Pressable>
-
-      <View
-        pointerEvents="none"
-        style={{
-          position: 'absolute',
-          top: insets.top + 46,
-          right: wingmanLayout.screenPadding,
-          width: 64,
-          paddingVertical: 5,
-          borderRadius: 999,
-          borderWidth: 1.5,
-          borderColor: '#E8DBBF',
-          backgroundColor: '#FFFFFF',
-          alignItems: 'center',
-          boxShadow: '0 3px 0 rgba(27, 34, 64, 0.10)',
-          zIndex: 20,
-        }}>
-        <Text
-          style={{
-            color: '#5A6178',
-            fontFamily: wingmanFonts.text,
-            fontSize: 11,
-            fontWeight: '800',
-            letterSpacing: 0.8,
-          }}>
-          {`${String(sceneIndex + 1).padStart(2, '0')} / ${String(onboardingScenes.length).padStart(2, '0')}`}
-        </Text>
-      </View>
 
       <View
         style={{
@@ -655,7 +651,8 @@ export function OnboardingScreen() {
         <WingmanButton
           fullWidth
           onPress={isLastScene ? continueToCreateAccount : goToNextScene}
-          iconRight="arrow-right">
+          iconRight="arrow-right"
+          style={{ backgroundColor: '#1D4ED8', borderColor: '#1E40AF' }}>
           {isLastScene ? 'Continue' : 'Next'}
         </WingmanButton>
       </View>

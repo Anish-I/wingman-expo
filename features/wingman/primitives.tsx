@@ -347,9 +347,11 @@ export function WingmanButton({
 export function WingmanLabel({
   children,
   color,
+  textColor,
 }: {
   children: React.ReactNode;
   color?: string;
+  textColor?: string;
 }) {
   const { colors } = useWingman();
 
@@ -365,7 +367,7 @@ export function WingmanLabel({
       />
       <Text
         style={{
-          color: colors.fgMuted,
+          color: textColor ?? colors.fgMuted,
           fontFamily: wingmanFonts.text,
           fontSize: 11,
           fontWeight: '800',
