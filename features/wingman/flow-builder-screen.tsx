@@ -2,6 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
 import {
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -473,7 +474,7 @@ export function FlowBuilderScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { flowId } = useLocalSearchParams<{ flowId?: string }>();
-  const { colors, flows, getFlowDetail, runFlow, updateFlow } = useWingman();
+  const { colors, deleteFlow, flows, getFlowDetail, runFlow, updateFlow } = useWingman();
 
   const flow = React.useMemo(
     () => flows.find((item) => item.id === flowId) ?? flows[0] ?? fallbackFlow,
@@ -660,6 +661,36 @@ export function FlowBuilderScreen() {
   }, [flow.id, incompleteStep, persist, running, runFlow, steps.length]);
 
   const canTest = steps.length > 0 && !running;
+  // `flow` falls back to a placeholder when the list is empty; only offer delete
+  // for a flow that actually exists server-side.
+  const isRealFlow = flows.some((item) => item.id === flow.id);
+
+  const handleDelete = React.useCallback(() => {
+    Alert.alert(
+      'Delete this flow?',
+      `“${title || flow.title}” will be removed and stop running. This can't be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            } catch {
+              // Haptics are best-effort.
+            }
+            const ok = await deleteFlow(flow.id);
+            if (ok) {
+              router.back();
+            } else {
+              setStatus({ tone: 'error', text: 'Could not delete this flow. Try again.' });
+            }
+          },
+        },
+      ],
+    );
+  }, [deleteFlow, flow.id, flow.title, router, title]);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -799,6 +830,24 @@ export function FlowBuilderScreen() {
             {running ? 'Running…' : 'Test run now'}
           </Text>
         </Pressable>
+
+        {isRealFlow ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Delete this flow"
+            onPress={handleDelete}
+            style={({ pressed }) => ({
+              marginTop: 10, minHeight: 46, borderRadius: 14, borderWidth: 1.5,
+              borderColor: withAlpha(colors.error, 0.5), backgroundColor: withAlpha(colors.error, 0.08),
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+              opacity: pressed ? 0.76 : 1, borderCurve: 'continuous',
+            })}>
+            <IconGlyph name="trash" color={colors.error} size={16} />
+            <Text style={{ color: colors.error, fontFamily: wingmanFonts.text, fontSize: 13, fontWeight: '900' }}>
+              Delete flow
+            </Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       {status ? <StatusStrip status={status} /> : null}

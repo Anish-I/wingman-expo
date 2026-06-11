@@ -108,6 +108,7 @@ type WingmanContextValue = {
   getFlowDetail: (id: string) => Promise<FlowDetail | null>;
   updateFlow: (id: string, input: FlowUpdateInput) => Promise<FlowItem | null>;
   runFlow: (id: string) => Promise<FlowRunResult | null>;
+  deleteFlow: (id: string) => Promise<boolean>;
   toggleFlow: (id: string, nextValue: boolean) => Promise<void>;
   setPushEnabled: (value: boolean) => Promise<void>;
   setMemoryEnabled: (value: boolean) => Promise<void>;
@@ -468,6 +469,29 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clearSession, refreshData, session?.token]);
 
+  const deleteFlow = React.useCallback(async (id: string): Promise<boolean> => {
+    if (!session?.token) {
+      return false;
+    }
+    // Optimistically drop it so the UI feels instant; restore on failure.
+    let removed: FlowItem | undefined;
+    setFlows((currentFlows) => {
+      removed = currentFlows.find((flow) => flow.id === id);
+      return currentFlows.filter((flow) => flow.id !== id);
+    });
+    try {
+      await deleteFlowRequest(session.token, id);
+      return true;
+    } catch (error) {
+      // Put it back where it was.
+      if (removed) setFlows((currentFlows) => (currentFlows.some((f) => f.id === id) ? currentFlows : [removed as FlowItem, ...currentFlows]));
+      if (error instanceof Error && error.message === 'Unauthorized') {
+        clearSession();
+      }
+      return false;
+    }
+  }, [clearSession, session?.token]);
+
   const streamChatMessage = React.useCallback(async (message: string): Promise<AuthResult> => {
     if (!session?.token) {
       return { ok: false, error: 'Sign in to chat with Pip.' };
@@ -670,6 +694,7 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     getFlowDetail,
     updateFlow,
     runFlow,
+    deleteFlow,
     toggleFlow,
     setPushEnabled,
     setMemoryEnabled,

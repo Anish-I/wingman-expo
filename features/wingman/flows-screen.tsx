@@ -2,7 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
-import { type GestureResponderEvent, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, type GestureResponderEvent, Pressable, ScrollView, Text, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -36,9 +36,10 @@ type FlowRowProps = {
   index: number;
   onEdit: (id: string) => void;
   onToggle: (id: string, next: boolean) => void;
+  onDelete: (id: string, title: string) => void;
 };
 
-function FlowRow({ flow, index, onEdit, onToggle }: FlowRowProps) {
+function FlowRow({ flow, index, onEdit, onToggle, onDelete }: FlowRowProps) {
   const { colors, resolvedTheme } = useWingman();
   const active = flow.active;
 
@@ -198,6 +199,28 @@ function FlowRow({ flow, index, onEdit, onToggle }: FlowRowProps) {
                     borderCurve: 'continuous',
                   })}>
                   <IconGlyph name="edit" color={active ? flow.color : colors.fgMuted} size={13} />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${flow.title}`}
+                  onPress={async (event: GestureResponderEvent) => {
+                    event.stopPropagation();
+                    await Haptics.selectionAsync();
+                    onDelete(flow.id, flow.title);
+                  }}
+                  style={({ pressed }) => ({
+                    width: 28,
+                    height: 28,
+                    borderRadius: 14,
+                    borderWidth: 1.5,
+                    borderColor: colors.border,
+                    backgroundColor: colors.card,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    opacity: pressed ? 0.72 : 1,
+                    borderCurve: 'continuous',
+                  })}>
+                  <IconGlyph name="trash" color={colors.fgMuted} size={13} />
                 </Pressable>
                 <View style={{ transform: [{ scale: 0.72 }], marginRight: -7 }}>
                   <WingmanToggle
@@ -361,7 +384,7 @@ function CompactHeader({
 export function FlowsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { activeFlowsCount, colors, createFlow, dataError, dataLoading, flows, refreshData, toggleFlow } = useWingman();
+  const { activeFlowsCount, colors, createFlow, dataError, dataLoading, deleteFlow, flows, refreshData, toggleFlow } = useWingman();
   const { play: pipPlay } = usePipController();
   const newFlowScale = useSharedValue(1);
 
@@ -369,6 +392,28 @@ export function FlowsScreen() {
     void toggleFlow(id, next);
     if (next) pipPlay('clap', { say: 'On it! 🪶' });
   }, [pipPlay, toggleFlow]);
+
+  const handleDeleteFlow = React.useCallback((id: string, title: string) => {
+    Alert.alert(
+      'Delete this flow?',
+      `“${title}” will be removed and stop running. This can't be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            } catch {
+              // Haptics are best-effort.
+            }
+            void deleteFlow(id);
+          },
+        },
+      ],
+    );
+  }, [deleteFlow]);
 
   const totalRuns = flows.reduce((sum, flow) => sum + flow.runs, 0);
   const pausedCount = flows.length - activeFlowsCount;
@@ -472,6 +517,7 @@ export function FlowsScreen() {
                   router.push(`/flow-builder?flowId=${encodeURIComponent(id)}` as never);
                 }}
                 onToggle={handleToggleFlow}
+                onDelete={handleDeleteFlow}
               />
             ))}
           </Animated.View>

@@ -114,6 +114,25 @@ test('updateFlow re-derives the trigger and merges partial fields', { skip }, as
   assert.equal(await store.updateFlow(flow.id, other.account.id, { title: 'Hijack' }), null);
 });
 
+test('deleteFlow removes only the owner\'s flow', { skip }, async () => {
+  const store = await freshStore();
+  const owner = await store.createAccount({ name: 'Owner', email: `own-${rid()}@example.com`, password: 'secret123' });
+  const other = await store.createAccount({ name: 'Other', email: `oth-${rid()}@example.com`, password: 'secret123' });
+  assert.ok(owner.ok && other.ok);
+  const flow = await store.createFlow(owner.account.id, { title: 'Disposable', schedule: null, steps: [] });
+
+  // Another user can't delete it.
+  assert.equal(await store.deleteFlow(flow.id, other.account.id), false);
+  assert.ok(await store.getFlowById(flow.id, owner.account.id), 'flow still exists after foreign delete');
+
+  // The owner can, and it's gone.
+  assert.equal(await store.deleteFlow(flow.id, owner.account.id), true);
+  assert.equal(await store.getFlowById(flow.id, owner.account.id), null);
+
+  // Deleting again is a no-op (already gone).
+  assert.equal(await store.deleteFlow(flow.id, owner.account.id), false);
+});
+
 test('connect token round-trips and marks app connected', { skip }, async () => {
   const store = await freshStore();
   const created = await store.createAccount({ name: 'Conn', email: `conn-${rid()}@example.com`, password: 'secret123' });

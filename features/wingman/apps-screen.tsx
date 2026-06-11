@@ -224,7 +224,7 @@ export function AppsScreen() {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search 1,000+ apps…"
+            placeholder="Search apps…"
             placeholderTextColor={colors.fgMuted}
             style={{
               flex: 1,

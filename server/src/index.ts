@@ -398,9 +398,10 @@ app.get('/apps', async (request, reply) => {
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
+  const items = await appsForUser(user.id);
   return reply.send({
-    totalAvailable: 1003,
-    items: await appsForUser(user.id),
+    totalAvailable: items.length,
+    items,
   });
 });
 
