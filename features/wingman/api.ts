@@ -37,6 +37,8 @@ type RequestOptions = {
   method?: string;
   token?: string | null;
   body?: unknown;
+  /** Override the default request timeout (ms). Use for slow LLM-backed routes. */
+  timeoutMs?: number;
 };
 
 async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -46,7 +48,7 @@ async function requestJson<T>(path: string, options: RequestOptions = {}): Promi
   const timeout = setTimeout(() => {
     didTimeout = true;
     controller.abort(timeoutError);
-  }, REQUEST_TIMEOUT_MS);
+  }, options.timeoutMs ?? REQUEST_TIMEOUT_MS);
 
   // Only advertise a JSON body when we actually send one. Fastify rejects an
   // empty body when Content-Type is application/json (FST_ERR_CTP_EMPTY_JSON_BODY),
@@ -216,12 +218,15 @@ export async function fetchFlowCatalog(token: string) {
   return requestJson<{ nodes: CatalogNode[] }>('/flows/catalog', { token });
 }
 
-/** "Generate with AI" — turn a description into a real, live flow. */
+/** "Generate with AI" — turn a description into a real, live flow.
+ *  Backed by a live LLM turn, so it gets a generous timeout (the 4.5s default
+ *  would abort mid-generation even though the flow still gets created). */
 export async function generateFlow(token: string, prompt: string) {
   return requestJson<{ flow: FlowItem }>('/flows/generate', {
     method: 'POST',
     token,
     body: { prompt },
+    timeoutMs: 45000,
   });
 }
 

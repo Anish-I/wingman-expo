@@ -61,6 +61,62 @@ function parseTitle(intent: string): string {
   return 'New event';
 }
 
+/**
+ * Parse an explicit `date` arg (from the builder's Date field or the AI) into a
+ * concrete day. Accepts "today"/"tomorrow", ISO `YYYY-MM-DD`, or `M/D[/Y]`.
+ * Returns null when empty/unrecognized so the caller can fall back to the intent.
+ */
+function parseDateField(value: string): Date | null {
+  const v = value.trim().toLowerCase();
+  if (!v) return null;
+  if (v === 'today') return new Date();
+  if (v === 'tomorrow') {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d;
+  }
+  const iso = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    const d = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  const slash = v.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
+  if (slash) {
+    const now = new Date();
+    const rawYear = slash[3];
+    const year = rawYear ? (rawYear.length === 2 ? 2000 + Number(rawYear) : Number(rawYear)) : now.getFullYear();
+    const d = new Date(year, Number(slash[1]) - 1, Number(slash[2]));
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+/**
+ * Parse an explicit `time` arg. Accepts "noon"/"midnight", 12-hour `2pm`/`2:30 pm`,
+ * or 24-hour `14:00`. Returns null when empty/unrecognized.
+ */
+function parseTimeField(value: string): { hour: number; minute: number } | null {
+  const v = value.trim().toLowerCase();
+  if (!v) return null;
+  if (v === 'noon') return { hour: 12, minute: 0 };
+  if (v === 'midnight') return { hour: 0, minute: 0 };
+  const ampm = v.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+  if (ampm) {
+    const rawHour = Number(ampm[1]);
+    const minute = Number(ampm[2] ?? '0');
+    const suffix = ampm[3];
+    const hour = suffix === 'pm' && rawHour < 12 ? rawHour + 12 : suffix === 'am' && rawHour === 12 ? 0 : rawHour;
+    return { hour, minute };
+  }
+  const h24 = v.match(/^(\d{1,2}):(\d{2})$/);
+  if (h24) {
+    const hour = Number(h24[1]);
+    const minute = Number(h24[2]);
+    if (hour < 24 && minute < 60) return { hour, minute };
+  }
+  return null;
+}
+
 export const calendarReadToday: ServerTool = {
   definition: {
     name: 'calendar_read_today',
@@ -103,18 +159,24 @@ export const calendarReadToday: ServerTool = {
 export const calendarCreateEvent: ServerTool = {
   definition: {
     name: 'calendar_create_event',
-    description: 'Create a calendar event from a natural-language intent (e.g. "lunch with Mara tomorrow at noon"). Returns the created event details.',
+    description:
+      'Create a calendar event. Prefer the explicit fields — `title` (what), `date` ("today"/"tomorrow" or YYYY-MM-DD), `time` ("2pm"/"14:00"/"noon"). `intent` is a free-form fallback (e.g. "lunch with Mara tomorrow at noon") parsed only for fields you leave blank. Returns the created event details.',
     parameters: {
       type: 'object',
       properties: {
-        intent: { type: 'string', description: 'Free-form description of the event the user wants to create.' },
-        title: { type: 'string', description: 'Optional override for the event title.' },
+        title: { type: 'string', description: 'Event title / what to schedule.' },
+        date: { type: 'string', description: 'Event date: "today", "tomorrow", or YYYY-MM-DD.' },
+        time: { type: 'string', description: 'Event time: "2pm", "2:30pm", "14:00", or "noon".' },
+        intent: { type: 'string', description: 'Optional free-form description; used only to fill any blank field above.' },
       },
-      required: ['intent'],
+      required: [],
     },
   },
   async execute(args, ctx: ToolContext): Promise<ToolResult> {
     const intent = String(args.intent ?? '');
+    const dateArg = String(args.date ?? '');
+    const timeArg = String(args.time ?? '');
+    const titleArg = typeof args.title === 'string' ? args.title.trim() : '';
     const connected = (await ctx.store.getApps(ctx.userId)).some((a) => a.slug === 'googlecalendar' && a.connected);
     if (!connected) {
       return {
@@ -122,14 +184,17 @@ export const calendarCreateEvent: ServerTool = {
         meta: { kind: 'connection_required', appSlug: 'googlecalendar' },
       };
     }
-    const offset = parseTargetDay(intent);
-    const { hour, minute } = parseTime(intent);
-    const start = new Date();
-    start.setDate(start.getDate() + offset);
+    // Explicit fields win; fall back to parsing the free-form intent for any blank.
+    const start = parseDateField(dateArg) ?? (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + parseTargetDay(intent));
+      return d;
+    })();
+    const { hour, minute } = parseTimeField(timeArg) ?? parseTime(intent);
     start.setHours(hour, minute, 0, 0);
     const end = new Date(start);
     end.setMinutes(end.getMinutes() + 30);
-    const title = typeof args.title === 'string' && args.title.trim() ? args.title : parseTitle(intent);
+    const title = titleArg || (intent ? parseTitle(intent) : 'New event');
     const event = await ctx.store.createCalendarEvent(ctx.userId, {
       title,
       startIso: start.toISOString(),

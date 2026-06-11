@@ -61,10 +61,14 @@ export const FLOW_CATALOG: CatalogNode[] = [
     key: 'create-event',
     label: 'Create a calendar event',
     emoji: '➕',
-    description: 'Add an event from a description',
+    description: 'Add an event with a title, date, and time',
     tool: 'calendar_create_event',
-    defaultArgs: { intent: '' },
-    fields: [{ name: 'intent', label: 'What to schedule', placeholder: 'lunch with Mara tomorrow at noon' }],
+    defaultArgs: { title: '', date: '', time: '' },
+    fields: [
+      { name: 'title', label: 'Event', placeholder: 'Lunch with Mara' },
+      { name: 'date', label: 'Date', placeholder: 'tomorrow · or 2026-06-15', optional: true },
+      { name: 'time', label: 'Time', placeholder: '12:00 · or 2pm', optional: true },
+    ],
   },
   {
     key: 'gmail-send',
