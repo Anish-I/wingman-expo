@@ -240,7 +240,7 @@ export const onboardingScenes: OnboardingScene[] = [
     pip: 'business',
     eyebrow: '1,000+ apps wired in',
     title: 'Connect once. Use everywhere.',
-    body: "Gmail, Calendar, Slack, Spotify, Notion, Linear, GitHub. I plug into them so you don't have to.",
+    body: "Gmail, Calendar, Notion, Spotify, and a thousand more. I plug into them so you don't have to.",
     bg: palette.lav100,
     accent: palette.lav500,
     apps: [
@@ -254,14 +254,14 @@ export const onboardingScenes: OnboardingScene[] = [
     id: 'flows',
     pip: 'clap',
     eyebrow: 'Automations on autopilot',
-    title: 'Set it and forget it.',
+    title: 'Set it and\nforget it.',
     body: "I'll send you a morning digest, text before your meetings, or nudge the team when a PR is stale.",
     bg: palette.coral100,
     accent: palette.coral500,
     flows: [
       { emoji: '📧', title: 'Morning digest', time: '8:00 AM' },
       { emoji: '📆', title: 'Calendar brief', time: 'Nightly' },
-      { emoji: '🐙', title: 'PR notifier', time: 'On activity' },
+      { emoji: '🔀', title: 'PR notifier', time: 'On activity' },
     ],
   },
   {

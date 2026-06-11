@@ -10,7 +10,6 @@ import {
   View,
 } from 'react-native';
 import RNAnimated, {
-  FadeIn,
   FadeInDown,
   FadeInUp,
   ZoomIn,
@@ -325,11 +324,9 @@ function OnboardingDetail({ scene }: { scene: (typeof onboardingScenes)[number] 
 function SceneBody({
   scene,
   active,
-  onContinue,
 }: {
   scene: (typeof onboardingScenes)[number];
   active: boolean;
-  onContinue: () => void;
 }) {
   const progress = useSharedValue(active ? 1 : 0);
 
@@ -370,13 +367,6 @@ function SceneBody({
       <View style={{ marginTop: 12 }}>
         <OnboardingDetail scene={scene} />
       </View>
-      {scene.id === 'privacy' ? (
-        <RNAnimated.View entering={FadeInUp.delay(320).duration(300)} style={{ marginTop: 18, maxWidth: 190 }}>
-          <WingmanButton fullWidth onPress={onContinue} iconRight="arrow-right">
-            Continue
-          </WingmanButton>
-        </RNAnimated.View>
-      ) : null}
     </RNAnimated.View>
   );
 }
@@ -401,13 +391,13 @@ function PagerDot({
   }));
 
   return (
-    <Pressable onPress={onPress}>
+    <Pressable onPress={onPress} hitSlop={{ top: 18, bottom: 18, left: 5, right: 5 }}>
       <RNAnimated.View
         style={[
           {
             height: 8,
             borderRadius: 999,
-            backgroundColor: active ? accent : withAlpha('#1B2240', 0.18),
+            backgroundColor: active ? accent : withAlpha('#1B2240', 0.34),
           },
           animatedStyle,
         ]}
@@ -445,8 +435,8 @@ function OnboardingBirdRibbon({
     <Pressable
       onPress={onPress}
       style={{
-        width: 152,
-        height: 152,
+        width: 120,
+        height: 120,
       }}>
       <Animated.View
         style={{
@@ -473,8 +463,8 @@ function OnboardingBirdRibbon({
             source={heroSource}
             contentFit="contain"
             style={{
-              width: 138,
-              height: 138,
+              width: 110,
+              height: 110,
             }}
           />
         </RNAnimated.View>
@@ -492,6 +482,7 @@ export function OnboardingScreen() {
   const [transitionDirection, setTransitionDirection] = React.useState(1);
   const sceneHeight = Math.max(height, 1);
   const currentScene = onboardingScenes[sceneIndex];
+  const isLastScene = sceneIndex === onboardingScenes.length - 1;
 
   const goToScene = React.useCallback((nextSceneIndex: number) => {
     const boundedIndex = Math.min(
@@ -592,7 +583,9 @@ export function OnboardingScreen() {
             />
           ))}
         </View>
-        <Pressable onPress={finishOnboarding}>
+        <Pressable
+          onPress={finishOnboarding}
+          hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
           <Text
             style={{
               color: '#2D3555',
@@ -619,7 +612,7 @@ export function OnboardingScreen() {
         <RNAnimated.View
           entering={(transitionDirection > 0 ? FadeInUp : FadeInDown).duration(200)}
           style={{ gap: 14 }}>
-          <SceneBody scene={currentScene} active onContinue={continueToCreateAccount} />
+          <SceneBody scene={currentScene} active />
         </RNAnimated.View>
       </Pressable>
 
@@ -641,7 +634,7 @@ export function OnboardingScreen() {
         }}>
         <Text
           style={{
-            color: '#7C8299',
+            color: '#5A6178',
             fontFamily: wingmanFonts.text,
             fontSize: 11,
             fontWeight: '800',
@@ -654,8 +647,24 @@ export function OnboardingScreen() {
       <View
         style={{
           position: 'absolute',
+          left: wingmanLayout.screenPadding,
+          right: wingmanLayout.screenPadding + 124,
+          bottom: 30 + insets.bottom,
+          zIndex: 10,
+        }}>
+        <WingmanButton
+          fullWidth
+          onPress={isLastScene ? continueToCreateAccount : goToNextScene}
+          iconRight="arrow-right">
+          {isLastScene ? 'Continue' : 'Next'}
+        </WingmanButton>
+      </View>
+
+      <View
+        style={{
+          position: 'absolute',
           right: 12,
-          bottom: 42 + insets.bottom,
+          bottom: 30 + insets.bottom,
           zIndex: 10,
         }}>
         <OnboardingBirdRibbon
@@ -666,7 +675,7 @@ export function OnboardingScreen() {
               return;
             }
 
-            finishOnboarding();
+            continueToCreateAccount();
           }}
         />
       </View>
