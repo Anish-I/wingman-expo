@@ -16,8 +16,9 @@ import { runChatTurn } from './chat/orchestrator.js';
 import { startScheduler, runDueFlows } from './flows/scheduler.js';
 import { createNotifier } from './push/notifier.js';
 import { runFlowDefinition, validateSteps } from './flows/runner.js';
-import { builtinTools } from './tools/builtin.js';
-import type { ChatEvent } from './llm/types.js';
+import { createFlow } from './tools/builtin.js';
+import { FLOW_CATALOG, CATALOG_TOOL_NAMES } from './flows/catalog.js';
+import type { ChatEvent, ToolCall } from './llm/types.js';
 
 loadEnv();
 
@@ -476,7 +477,7 @@ app.post('/chat/stream', async (request, reply) => {
   }
   const payload = chatPayloadSchema.parse(request.body);
   const writer = openSSE(reply);
-  const ctx = { userId: user.id, store, composio: composioRuntime };
+  const ctx = { userId: user.id, store, composio: composioRuntime, llm: llmProvider };
   const registry = await buildRegistry({ ctx, composio: composioRuntime, message: payload.message });
   await runChatTurn({
     provider: llmProvider,
@@ -496,7 +497,7 @@ app.post('/chat', async (request, reply) => {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   const payload = chatPayloadSchema.parse(request.body);
-  const ctx = { userId: user.id, store, composio: composioRuntime };
+  const ctx = { userId: user.id, store, composio: composioRuntime, llm: llmProvider };
   const registry = await buildRegistry({ ctx, composio: composioRuntime, message: payload.message });
   let assembled = '';
   let connectionRequired: { appSlug: string; oauthUrl?: string | null } | null = null;
@@ -610,10 +611,10 @@ app.post('/flows', async (request, reply) => {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
   const input = createFlowSchema.parse(request.body);
-  // Validate steps against the known tool set before persisting.
+  // Validate steps against the node catalog before persisting. Using the catalog
+  // (not all builtin tools) keeps non-node tools like create_flow out of flows.
   if (input?.steps?.length) {
-    const known = new Set(Object.keys(builtinTools));
-    const error = validateSteps(input.steps, known);
+    const error = validateSteps(input.steps, CATALOG_TOOL_NAMES);
     if (error) {
       return reply.status(400).send({ error });
     }
@@ -631,8 +632,7 @@ app.put('/flows/:id', async (request, reply) => {
   const params = z.object({ id: z.string() }).parse(request.params);
   const input = updateFlowSchema.parse(request.body);
   if (input.steps?.length) {
-    const known = new Set(Object.keys(builtinTools));
-    const error = validateSteps(input.steps, known);
+    const error = validateSteps(input.steps, CATALOG_TOOL_NAMES);
     if (error) {
       return reply.status(400).send({ error });
     }
@@ -678,7 +678,7 @@ app.post('/flows/:id/run', async (request, reply) => {
   if (!flow || !flow.definition || flow.definition.steps.length === 0) {
     return reply.status(404).send({ error: 'Flow not found or has no runnable steps.' });
   }
-  const ctx = { userId: user.id, store, composio: composioRuntime };
+  const ctx = { userId: user.id, store, composio: composioRuntime, llm: llmProvider };
   const registry = await buildRegistry({ ctx, composio: composioRuntime });
   const result = await runFlowDefinition(flow.definition, registry, ctx);
   await store.recordFlowRun(flow.id, user.id, new Date().toISOString());
@@ -717,6 +717,59 @@ app.patch('/flows/:id', async (request, reply) => {
   return reply.send({ flow });
 });
 
+// The node catalog the builder renders and the AI builds from (single source of
+// truth lives in flows/catalog.ts). Auth'd so only signed-in users can read it.
+app.get('/flows/catalog', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  return reply.send({ nodes: FLOW_CATALOG });
+});
+
+// "Generate with AI" — turn a one-line description into a real flow. One non-
+// streaming LLM turn that may call create_flow exactly once, then we execute it.
+app.post('/flows/generate', async (request, reply) => {
+  const user = await getAuthedUser(request);
+  if (!user) {
+    return reply.status(401).send({ error: 'Unauthorized' });
+  }
+  const { prompt } = z.object({ prompt: z.string().min(1) }).parse(request.body);
+  const ctx = { userId: user.id, store, composio: composioRuntime, llm: llmProvider };
+
+  const system =
+    'You build a single automation (flow) for the user by calling the create_flow tool exactly once. ' +
+    'Choose steps only from the catalog in the tool description. If the user implies timing, set a sensible ' +
+    'schedule; otherwise use null (manual). Always call create_flow — never reply with plain text.';
+
+  let toolCall: ToolCall | null = null;
+  for await (const chunk of llmProvider.stream({
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: prompt },
+    ],
+    tools: [createFlow.definition],
+  })) {
+    if (chunk.type === 'tool_call' && chunk.call.name === 'create_flow') {
+      toolCall = chunk.call;
+    } else if (chunk.type === 'finish' && chunk.full?.toolCalls?.length) {
+      const c = chunk.full.toolCalls.find((t) => t.name === 'create_flow');
+      if (c) toolCall = c;
+    }
+  }
+
+  if (!toolCall) {
+    return reply.status(422).send({ error: "Couldn't turn that into a flow. Try naming the trigger and what should happen." });
+  }
+
+  const result = await createFlow.execute(toolCall.arguments, ctx);
+  if (result.meta?.kind !== 'flow_created') {
+    return reply.status(422).send({ error: result.output });
+  }
+  const flow = await store.getFlowById(result.meta.flowId, user.id);
+  return reply.status(201).send({ flow });
+});
+
 app.post('/dev/ui-critique', async (request, reply) => {
   const user = await getAuthedUser(request);
   if (!user) {
@@ -731,7 +784,7 @@ app.post('/dev/ui-critique', async (request, reply) => {
 });
 
 // Start the flow scheduler (once-a-minute tick; runs due flows).
-const scheduler = startScheduler(store, composioRuntime, notifier);
+const scheduler = startScheduler(store, composioRuntime, notifier, llmProvider);
 app.addHook('onClose', async () => {
   scheduler.stop();
 });

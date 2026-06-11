@@ -1,5 +1,6 @@
 import type { PgStore } from '../store.js';
 import type { ComposioRuntime } from '../tools/composio.js';
+import type { LLMProvider } from '../llm/types.js';
 import type { Notifier } from '../push/notifier.js';
 import { buildRegistry } from '../tools/registry.js';
 import { isDue } from './schedule.js';
@@ -43,6 +44,7 @@ export async function runDueFlows(
   composio: ComposioRuntime,
   now: Date = new Date(),
   notifier?: Notifier,
+  llm?: LLMProvider,
 ): Promise<number> {
   const flows = await store.getActiveScheduledFlows();
   let ran = 0;
@@ -54,7 +56,7 @@ export async function runDueFlows(
     // Already ran this minute? skip (idempotent within the tick window).
     if (flow.lastRunAt && sameMinute(flow.lastRunAt, now)) continue;
 
-    const ctx = { userId: flow.userId, store, composio };
+    const ctx = { userId: flow.userId, store, composio, llm };
     try {
       const registry = await buildRegistry({ ctx, composio });
       const result = await runFlowDefinition(def, registry, ctx);
@@ -98,9 +100,9 @@ export async function runDueFlows(
   return ran;
 }
 
-export function startScheduler(store: PgStore, composio: ComposioRuntime, notifier?: Notifier): Scheduler {
+export function startScheduler(store: PgStore, composio: ComposioRuntime, notifier?: Notifier, llm?: LLMProvider): Scheduler {
   const timer = setInterval(() => {
-    void runDueFlows(store, composio, new Date(), notifier).catch((err) => {
+    void runDueFlows(store, composio, new Date(), notifier, llm).catch((err) => {
       console.warn('[scheduler] tick failed:', (err as Error).message);
     });
   }, TICK_MS);

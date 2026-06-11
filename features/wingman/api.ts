@@ -7,6 +7,7 @@ import type {
   AppIntegration,
   AuthSession,
   Briefing,
+  CatalogNode,
   DemoAuthCredentials,
   FlowDetail,
   FlowItem,
@@ -207,6 +208,20 @@ export async function deleteFlow(token: string, flowId: string) {
   return requestJson<{ ok: boolean }>(`/flows/${flowId}`, {
     method: 'DELETE',
     token,
+  });
+}
+
+/** The buildable node catalog (server is the source of truth). */
+export async function fetchFlowCatalog(token: string) {
+  return requestJson<{ nodes: CatalogNode[] }>('/flows/catalog', { token });
+}
+
+/** "Generate with AI" — turn a description into a real, live flow. */
+export async function generateFlow(token: string, prompt: string) {
+  return requestJson<{ flow: FlowItem }>('/flows/generate', {
+    method: 'POST',
+    token,
+    body: { prompt },
   });
 }
 

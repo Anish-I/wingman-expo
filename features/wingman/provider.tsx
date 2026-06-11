@@ -14,9 +14,11 @@ import {
   fetchBriefing,
   fetchChatHistory,
   fetchFlow,
+  fetchFlowCatalog,
   fetchFlows,
   fetchMe,
   fetchSettings,
+  generateFlow as generateFlowRequest,
   patchFlow,
   runFlow as runFlowRequest,
   runUiCritique,
@@ -40,6 +42,7 @@ import {
   type AuthSession,
   type AuthStage,
   type Briefing,
+  type CatalogNode,
   type CurrentUser,
   type FlowDetail,
   type FlowItem,
@@ -105,6 +108,8 @@ type WingmanContextValue = {
   refreshData: () => Promise<void>;
   setThemeMode: (mode: ThemeMode) => void;
   createFlow: () => Promise<FlowItem | null>;
+  generateFlow: (prompt: string) => Promise<FlowItem | null>;
+  getFlowCatalog: () => Promise<CatalogNode[]>;
   getFlowDetail: (id: string) => Promise<FlowDetail | null>;
   updateFlow: (id: string, input: FlowUpdateInput) => Promise<FlowItem | null>;
   runFlow: (id: string) => Promise<FlowRunResult | null>;
@@ -419,6 +424,40 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clearSession, session?.token]);
 
+  const generateFlow = React.useCallback(async (prompt: string): Promise<FlowItem | null> => {
+    if (!session?.token) {
+      return null;
+    }
+    try {
+      const response = await generateFlowRequest(session.token, prompt);
+      setFlows((currentFlows) => [response.flow, ...currentFlows]);
+      const activityResponse = await fetchActivity(session.token);
+      setEvents(activityResponse.items);
+      return response.flow;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Unauthorized') {
+        clearSession();
+        return null;
+      }
+      throw error;
+    }
+  }, [clearSession, session?.token]);
+
+  const getFlowCatalog = React.useCallback(async (): Promise<CatalogNode[]> => {
+    if (!session?.token) {
+      return [];
+    }
+    try {
+      const response = await fetchFlowCatalog(session.token);
+      return response.nodes;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Unauthorized') {
+        clearSession();
+      }
+      return [];
+    }
+  }, [clearSession, session?.token]);
+
   const getFlowDetail = React.useCallback(async (id: string): Promise<FlowDetail | null> => {
     if (!session?.token) {
       return null;
@@ -691,6 +730,8 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
     refreshData,
     setThemeMode,
     createFlow,
+    generateFlow,
+    getFlowCatalog,
     getFlowDetail,
     updateFlow,
     runFlow,

@@ -1,5 +1,33 @@
+import { nanoid } from 'nanoid';
+
 import type { ServerTool, ToolContext, ToolResult } from './types.js';
 import { composioActionTools } from './composio-actions.js';
+import { validateSteps } from '../flows/runner.js';
+import { CATALOG_TOOL_NAMES, FLOW_CATALOG, catalogForPrompt } from '../flows/catalog.js';
+import type { FlowSchedule, FlowStep } from '../flows/types.js';
+
+/** Run a single, non-streaming LLM completion and return the trimmed text.
+ *  Used by the `ai_step` smart node. Consumes the provider's token stream and
+ *  prefers the canonical `finish.full.content` when the provider supplies it. */
+async function runLLMText(ctx: ToolContext, system: string, user: string): Promise<string> {
+  if (!ctx.llm) throw new Error('No LLM provider is wired into this context.');
+  let text = '';
+  for await (const chunk of ctx.llm.stream({
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+  })) {
+    if (chunk.type === 'content_delta') text += chunk.delta;
+    else if (chunk.type === 'finish' && chunk.full?.content) text = chunk.full.content;
+  }
+  return text.trim();
+}
+
+/** Default args for a node's tool (used to backfill anything the model omits). */
+function defaultArgsForTool(tool: string): Record<string, unknown> {
+  return FLOW_CATALOG.find((n) => n.tool === tool)?.defaultArgs ?? {};
+}
 
 function fmtTime(iso: string): string {
   return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
@@ -198,12 +226,145 @@ export const remember: ServerTool = {
   },
 };
 
+// The "smart node": runs a focused LLM sub-task inside a flow (summarize, decide,
+// classify, draft). Its `input` typically templates a prior step's output via
+// {{steps.<id>.output}}, which the runner resolves before this tool runs.
+export const aiStep: ServerTool = {
+  definition: {
+    name: 'ai_step',
+    description:
+      'Run a focused AI sub-task inside a flow: summarize, decide, classify, or draft text. ' +
+      'Reads `prompt` (what to do) and optional `input` (source text — usually a prior step output). ' +
+      'Returns only the result text, ready for a later step to use.',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'What the AI should do, e.g. "Summarize into 3 bullet points".' },
+        input: { type: 'string', description: 'Optional source text to act on. In a flow, template a prior step with {{steps.<id>.output}}.' },
+      },
+      required: ['prompt'],
+    },
+  },
+  async execute(args, ctx: ToolContext): Promise<ToolResult> {
+    const prompt = String(args.prompt ?? '').trim();
+    if (!prompt) {
+      return { output: 'ai_step needs a prompt describing what to do.' };
+    }
+    const input = String(args.input ?? '').trim();
+    const system =
+      'You are a single step inside an automated workflow. Do exactly what the instruction asks and ' +
+      'reply with ONLY the result — no preamble, no explanation, no markdown code fences.';
+    const user = input ? `${prompt}\n\n---\nInput:\n${input}` : prompt;
+    const output = await runLLMText(ctx, system, user);
+    return { output: output || '(the AI step produced no output)' };
+  },
+};
+
+// Lets the AI assemble and persist a real, user-scoped flow from the node catalog.
+// Steps are validated against CATALOG_TOOL_NAMES (which excludes create_flow itself,
+// so a flow can never create flows). Created flows are active by default.
+export const createFlow: ServerTool = {
+  definition: {
+    name: 'create_flow',
+    description:
+      'Create a real automation (flow) for the user from the node catalog below. Steps run top-to-bottom; ' +
+      'a later step can reference an earlier one with {{steps.<id>.output}} in its args (ids are auto-assigned ' +
+      'in order: use {{steps.0.output}} for the first step, etc.). Provide a `schedule` to run it automatically, ' +
+      'or null for a manual-only flow. The flow goes live immediately unless `activate` is false.\n\n' +
+      'Available step tools:\n' +
+      catalogForPrompt(),
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short, human title, e.g. "Morning inbox digest".' },
+        description: { type: 'string', description: 'One-line description of what the flow does.' },
+        emoji: { type: 'string', description: 'A single emoji that represents the flow.' },
+        color: { type: 'string', description: 'Optional hex accent color, e.g. "#3B82F6".' },
+        schedule: {
+          type: ['object', 'null'],
+          description: 'When to run automatically, or null for manual only.',
+          properties: {
+            hour: { type: 'integer', description: '0–23 (local server time).' },
+            minute: { type: 'integer', description: '0–59.' },
+            days: { type: 'array', items: { type: 'integer' }, description: 'Weekdays 0=Sun..6=Sat; empty = every day.' },
+          },
+        },
+        steps: {
+          type: 'array',
+          description: 'Ordered steps. Each is a tool from the catalog plus its args.',
+          items: {
+            type: 'object',
+            properties: {
+              tool: { type: 'string', description: 'A tool name from the catalog (e.g. "gmail_summarize_inbox").' },
+              args: { type: 'object', description: 'Arguments for the tool.' },
+            },
+            required: ['tool'],
+          },
+        },
+        activate: { type: 'boolean', description: 'Whether the flow is live immediately. Default true.' },
+      },
+      required: ['title', 'steps'],
+    },
+  },
+  async execute(args, ctx: ToolContext): Promise<ToolResult> {
+    const rawSteps = Array.isArray(args.steps) ? (args.steps as Array<Record<string, unknown>>) : [];
+    const steps: FlowStep[] = rawSteps.map((s) => {
+      const tool = String(s?.tool ?? '');
+      const provided = (s?.args && typeof s.args === 'object') ? (s.args as Record<string, unknown>) : {};
+      return { id: `step_${nanoid(8)}`, tool, args: { ...defaultArgsForTool(tool), ...provided } };
+    });
+
+    const error = validateSteps(steps, CATALOG_TOOL_NAMES);
+    if (error) {
+      return { output: `Couldn't create the flow: ${error} Use only tools from the catalog.` };
+    }
+
+    // Normalize the schedule the model passed (or null for manual-only).
+    let schedule: FlowSchedule | null = null;
+    const rawSched = args.schedule as { hour?: unknown; minute?: unknown; days?: unknown } | null | undefined;
+    if (rawSched && typeof rawSched === 'object') {
+      const hour = Number(rawSched.hour);
+      const minute = Number(rawSched.minute);
+      if (Number.isInteger(hour) && hour >= 0 && hour <= 23 && Number.isInteger(minute) && minute >= 0 && minute <= 59) {
+        const days = Array.isArray(rawSched.days)
+          ? (rawSched.days as unknown[]).filter((d): d is number => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6)
+          : [];
+        schedule = { hour, minute, days };
+      }
+    }
+
+    const flow = await ctx.store.createFlow(ctx.userId, {
+      title: String(args.title ?? '').trim() || 'New flow',
+      description: typeof args.description === 'string' ? args.description : undefined,
+      emoji: typeof args.emoji === 'string' && args.emoji.trim() ? args.emoji : '✨',
+      color: typeof args.color === 'string' && args.color.trim() ? args.color : undefined,
+      schedule,
+      steps,
+    });
+
+    // createFlow sets active = steps.length > 0; honor an explicit activate:false.
+    let active = flow.active;
+    if (args.activate === false && flow.active) {
+      await ctx.store.setFlowActive(flow.id, ctx.userId, false);
+      active = false;
+    }
+
+    const when = schedule ? `scheduled (${flow.trigger})` : 'manual';
+    return {
+      output: `Created flow "${flow.title}" with ${steps.length} step${steps.length === 1 ? '' : 's'} — ${when}, ${active ? 'active now' : 'paused'}.`,
+      meta: { kind: 'flow_created', flowId: flow.id, title: flow.title },
+    };
+  },
+};
+
 export const builtinTools: Record<string, ServerTool> = {
   [calendarReadToday.definition.name]: calendarReadToday,
   [calendarCreateEvent.definition.name]: calendarCreateEvent,
   [briefingToday.definition.name]: briefingToday,
   [createAppConnection.definition.name]: createAppConnection,
   [remember.definition.name]: remember,
+  [aiStep.definition.name]: aiStep,
+  [createFlow.definition.name]: createFlow,
   // Real Gmail / Slack / Spotify actions, exposed as flow step modules.
   ...composioActionTools,
 };

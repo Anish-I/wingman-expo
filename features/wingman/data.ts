@@ -156,6 +156,27 @@ export type FlowRunResult = {
   failedStepId?: string;
 };
 
+/** One editable arg field on a catalog node (mirrors the server catalog). */
+export type CatalogField = {
+  name: string;
+  label: string;
+  placeholder?: string;
+  optional?: boolean;
+  multiline?: boolean;
+};
+
+/** A buildable flow node, served by GET /flows/catalog. The builder renders
+ *  these in the "Add step" sheet; the AI assembles flows from the same list. */
+export type CatalogNode = {
+  key: string;
+  label: string;
+  emoji: string;
+  description: string;
+  tool: string;
+  defaultArgs: Record<string, unknown>;
+  fields?: CatalogField[];
+};
+
 const FLOW_WEEKDAY_ABBR = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FLOW_WEEKDAYS = [1, 2, 3, 4, 5];
 const FLOW_WEEKEND = [0, 6];

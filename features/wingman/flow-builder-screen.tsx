@@ -33,7 +33,7 @@ import {
 // runner validates saved steps against these tool names, so this list is the
 // single source of truth for "what a flow can do".
 
-type StepArgField = { name: string; label: string; placeholder: string; optional?: boolean; multiline?: boolean };
+type StepArgField = { name: string; label: string; placeholder?: string; optional?: boolean; multiline?: boolean };
 
 type StepCatalogItem = {
   key: string;
@@ -45,7 +45,9 @@ type StepCatalogItem = {
   fields?: StepArgField[];
 };
 
-const STEP_CATALOG: StepCatalogItem[] = [
+// Bundled fallback. The live catalog is fetched from GET /flows/catalog (server is
+// the source of truth); this keeps the builder working offline / before that loads.
+const DEFAULT_CATALOG: StepCatalogItem[] = [
   {
     key: 'briefing',
     label: 'Morning briefing',
@@ -125,24 +127,37 @@ const STEP_CATALOG: StepCatalogItem[] = [
   {
     key: 'remember',
     label: 'Remember a note',
-    emoji: '🧠',
+    emoji: '📝',
     description: 'Save a fact to long-term memory',
     tool: 'remember',
     defaultArgs: { note: '' },
     fields: [{ name: 'note', label: 'Note to remember', placeholder: 'Standup is at 9am' }],
   },
+  {
+    key: 'ai-step',
+    label: 'AI smart step',
+    emoji: '🧠',
+    description: 'Let Pip think — summarize, decide, or draft from earlier steps',
+    tool: 'ai_step',
+    defaultArgs: { prompt: '', input: '' },
+    fields: [
+      { name: 'prompt', label: 'What should Pip do?', placeholder: 'Summarize the inbox into 3 bullets', multiline: true },
+      { name: 'input', label: 'Input (optional — use {{steps.0.output}})', placeholder: '{{steps.0.output}}', optional: true, multiline: true },
+    ],
+  },
 ];
 
 /** Find the catalog entry that best describes a saved step. */
-function catalogForStep(step: FlowStep): StepCatalogItem {
+function catalogForStep(step: FlowStep, catalog: StepCatalogItem[]): StepCatalogItem {
   if (step.tool === 'calendar_read_today') {
     const offset = typeof step.args?.offset === 'number' ? step.args.offset : 0;
     return (
-      STEP_CATALOG.find((item) => item.tool === step.tool && item.defaultArgs.offset === offset)
-      ?? STEP_CATALOG[1]!
+      catalog.find((item) => item.tool === step.tool && item.defaultArgs.offset === offset)
+      ?? catalog.find((item) => item.tool === step.tool)
+      ?? DEFAULT_CATALOG[1]!
     );
   }
-  return STEP_CATALOG.find((item) => item.tool === step.tool) ?? {
+  return catalog.find((item) => item.tool === step.tool) ?? {
     key: step.tool,
     label: step.tool,
     emoji: '⚡',
@@ -340,6 +355,7 @@ function StepCard({
   step,
   index,
   total,
+  catalog,
   onChangeArg,
   onMove,
   onRemove,
@@ -347,12 +363,13 @@ function StepCard({
   step: FlowStep;
   index: number;
   total: number;
+  catalog: StepCatalogItem[];
   onChangeArg: (id: string, argName: string, value: string) => void;
   onMove: (id: string, direction: -1 | 1) => void;
   onRemove: (id: string) => void;
 }) {
   const { colors } = useWingman();
-  const item = catalogForStep(step);
+  const item = catalogForStep(step, catalog);
 
   return (
     <View
@@ -455,10 +472,12 @@ function StepCard({
 
 function AddStepSheet({
   visible,
+  catalog,
   onClose,
   onPick,
 }: {
   visible: boolean;
+  catalog: StepCatalogItem[];
   onClose: () => void;
   onPick: (item: StepCatalogItem) => void;
 }) {
@@ -478,7 +497,7 @@ function AddStepSheet({
             Add a step
           </Text>
           <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 8 }} showsVerticalScrollIndicator={false}>
-            {STEP_CATALOG.map((item) => (
+            {catalog.map((item) => (
               <Pressable
                 key={item.key}
                 onPress={() => onPick(item)}
@@ -527,7 +546,21 @@ export function FlowBuilderScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { flowId } = useLocalSearchParams<{ flowId?: string }>();
-  const { colors, deleteFlow, flows, getFlowDetail, runFlow, updateFlow } = useWingman();
+  const { colors, deleteFlow, flows, getFlowCatalog, getFlowDetail, runFlow, updateFlow } = useWingman();
+
+  // Live node catalog from the server (source of truth), falling back to the
+  // bundled list until it loads or if the request fails.
+  const [catalog, setCatalog] = React.useState<StepCatalogItem[]>(DEFAULT_CATALOG);
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const nodes = await getFlowCatalog();
+      if (!cancelled && nodes.length) setCatalog(nodes as StepCatalogItem[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [getFlowCatalog]);
 
   const flow = React.useMemo(
     () => flows.find((item) => item.id === flowId) ?? flows[0] ?? fallbackFlow,
@@ -638,14 +671,14 @@ export function FlowBuilderScreen() {
   // Returns the offending step plus which field is missing for a precise message.
   const incompleteStep = React.useMemo(() => {
     for (const step of steps) {
-      const item = catalogForStep(step);
+      const item = catalogForStep(step, catalog);
       const missing = item.fields?.find(
         (field) => !field.optional && !String(step.args[field.name] ?? '').trim(),
       );
       if (missing) return { step, item, field: missing };
     }
     return null;
-  }, [steps]);
+  }, [steps, catalog]);
 
   const persist = React.useCallback(async (): Promise<boolean> => {
     const cleanTitle = title.trim() || 'New workflow';
@@ -817,6 +850,7 @@ export function FlowBuilderScreen() {
               step={step}
               index={index}
               total={steps.length}
+              catalog={catalog}
               onChangeArg={changeArg}
               onMove={moveStep}
               onRemove={removeStep}
@@ -903,7 +937,7 @@ export function FlowBuilderScreen() {
 
       {status ? <StatusStrip status={status} /> : null}
 
-      <AddStepSheet visible={pickerOpen} onClose={() => setPickerOpen(false)} onPick={addStep} />
+      <AddStepSheet visible={pickerOpen} catalog={catalog} onClose={() => setPickerOpen(false)} onPick={addStep} />
     </View>
   );
 }

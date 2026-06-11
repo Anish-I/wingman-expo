@@ -2,7 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import React from 'react';
-import { type GestureResponderEvent, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, type GestureResponderEvent, Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import Animated, {
   FadeIn,
   FadeInDown,
@@ -385,9 +385,36 @@ function CompactHeader({
 export function FlowsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { activeFlowsCount, colors, createFlow, dataError, dataLoading, deleteFlow, flows, refreshData, toggleFlow } = useWingman();
+  const { activeFlowsCount, colors, createFlow, dataError, dataLoading, deleteFlow, flows, generateFlow, refreshData, resolvedTheme, toggleFlow } = useWingman();
   const { play: pipPlay } = usePipController();
   const newFlowScale = useSharedValue(1);
+
+  // "Generate with AI" modal state.
+  const [genOpen, setGenOpen] = React.useState(false);
+  const [genPrompt, setGenPrompt] = React.useState('');
+  const [genBusy, setGenBusy] = React.useState(false);
+  const [genError, setGenError] = React.useState<string | null>(null);
+
+  const handleGenerateFlow = React.useCallback(async () => {
+    const prompt = genPrompt.trim();
+    if (!prompt || genBusy) return;
+    setGenBusy(true);
+    setGenError(null);
+    try {
+      const flow = await generateFlow(prompt);
+      if (flow) {
+        setGenOpen(false);
+        setGenPrompt('');
+        pipPlay('excited', { say: 'New flow! 🪶' });
+      } else {
+        setGenError('Could not create a flow. Try rewording it.');
+      }
+    } catch (error) {
+      setGenError(error instanceof Error ? error.message : 'Something went wrong.');
+    } finally {
+      setGenBusy(false);
+    }
+  }, [genPrompt, genBusy, generateFlow, pipPlay]);
 
   const handleToggleFlow = React.useCallback((id: string, next: boolean) => {
     void toggleFlow(id, next);
@@ -460,45 +487,80 @@ export function FlowsScreen() {
               gap: 12,
             }}>
             <WingmanLabel>Your automations</WingmanLabel>
-            <Animated.View style={newFlowAnimatedStyle}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Pressable
-                onPressIn={() => {
-                  newFlowScale.value = withSpring(0.94, { damping: 14, stiffness: 360 });
+                onPress={() => {
+                  setGenError(null);
+                  setGenOpen(true);
                 }}
-                onPressOut={() => {
-                  newFlowScale.value = withSpring(1, { damping: 14, stiffness: 320 });
-                }}
-                onPress={handleCreateFlow}
                 accessibilityRole="button"
-                accessibilityLabel="Create a new flow"
+                accessibilityLabel="Generate a flow with AI"
                 style={({ pressed }) => ({
                   height: 34,
                   paddingLeft: 11,
                   paddingRight: 13,
                   borderRadius: 17,
                   borderWidth: 1.5,
-                  borderColor: colors.sky700,
-                  backgroundColor: colors.sky500,
+                  borderColor: withAlpha(colors.sky500, 0.5),
+                  backgroundColor: colors.card,
                   flexDirection: 'row',
                   alignItems: 'center',
                   gap: 6,
                   opacity: pressed ? 0.82 : 1,
-                  boxShadow: skyShadow(),
                   borderCurve: 'continuous',
                 })}>
-                <IconGlyph name="plus" color="#FFFFFF" size={16} />
+                <Text style={{ fontSize: 14 }}>✨</Text>
                 <Text
                   style={{
-                    color: '#FFFFFF',
+                    color: colors.sky700,
                     fontFamily: wingmanFonts.text,
                     fontSize: 12,
                     fontWeight: '800',
                     letterSpacing: 0,
                   }}>
-                  New flow
+                  Generate
                 </Text>
               </Pressable>
-            </Animated.View>
+              <Animated.View style={newFlowAnimatedStyle}>
+                <Pressable
+                  onPressIn={() => {
+                    newFlowScale.value = withSpring(0.94, { damping: 14, stiffness: 360 });
+                  }}
+                  onPressOut={() => {
+                    newFlowScale.value = withSpring(1, { damping: 14, stiffness: 320 });
+                  }}
+                  onPress={handleCreateFlow}
+                  accessibilityRole="button"
+                  accessibilityLabel="Create a new flow"
+                  style={({ pressed }) => ({
+                    height: 34,
+                    paddingLeft: 11,
+                    paddingRight: 13,
+                    borderRadius: 17,
+                    borderWidth: 1.5,
+                    borderColor: colors.sky700,
+                    backgroundColor: colors.sky500,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    opacity: pressed ? 0.82 : 1,
+                    boxShadow: skyShadow(),
+                    borderCurve: 'continuous',
+                  })}>
+                  <IconGlyph name="plus" color="#FFFFFF" size={16} />
+                  <Text
+                    style={{
+                      color: '#FFFFFF',
+                      fontFamily: wingmanFonts.text,
+                      fontSize: 12,
+                      fontWeight: '800',
+                      letterSpacing: 0,
+                    }}>
+                    New flow
+                  </Text>
+                </Pressable>
+              </Animated.View>
+            </View>
           </Animated.View>
 
           <Animated.View
@@ -546,6 +608,90 @@ export function FlowsScreen() {
           ) : null}
         </View>
       </ScrollView>
+
+      <Modal visible={genOpen} transparent animationType="fade" onRequestClose={() => setGenOpen(false)}>
+        <Pressable
+          onPress={() => (genBusy ? null : setGenOpen(false))}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 }}>
+          <Pressable
+            onPress={(e: GestureResponderEvent) => e.stopPropagation()}
+            style={{
+              backgroundColor: colors.card,
+              borderRadius: 22,
+              borderWidth: 1.5,
+              borderColor: colors.border,
+              padding: 18,
+              gap: 12,
+              boxShadow: stickerShadow(resolvedTheme),
+              borderCurve: 'continuous',
+            }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontSize: 18 }}>✨</Text>
+              <Text style={{ color: colors.ink, fontFamily: wingmanFonts.text, fontSize: 16, fontWeight: '800' }}>
+                Generate a flow
+              </Text>
+            </View>
+            <Text style={{ color: colors.fgSecondary, fontFamily: wingmanFonts.text, fontSize: 13, lineHeight: 18 }}>
+              Describe what Pip should automate — the trigger and what should happen.
+            </Text>
+            <TextInput
+              value={genPrompt}
+              onChangeText={setGenPrompt}
+              editable={!genBusy}
+              multiline
+              placeholder="e.g. Every weekday at 8am, read my calendar and email me a summary"
+              placeholderTextColor={colors.fgMuted}
+              style={{
+                minHeight: 84,
+                borderRadius: 14,
+                borderWidth: 1.5,
+                borderColor: colors.border,
+                backgroundColor: colors.cardAlt,
+                padding: 12,
+                color: colors.ink,
+                fontFamily: wingmanFonts.text,
+                fontSize: 14,
+                textAlignVertical: 'top',
+              }}
+            />
+            {genError ? (
+              <Text style={{ color: colors.coral500, fontFamily: wingmanFonts.text, fontSize: 12, fontWeight: '700' }}>
+                {genError}
+              </Text>
+            ) : null}
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 2 }}>
+              <Pressable
+                onPress={() => (genBusy ? null : setGenOpen(false))}
+                style={({ pressed }) => ({ paddingHorizontal: 14, paddingVertical: 9, opacity: pressed ? 0.7 : 1 })}>
+                <Text style={{ color: colors.fgSecondary, fontFamily: wingmanFonts.text, fontSize: 13, fontWeight: '700' }}>
+                  Cancel
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => void handleGenerateFlow()}
+                disabled={genBusy || !genPrompt.trim()}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingHorizontal: 16,
+                  paddingVertical: 9,
+                  borderRadius: 14,
+                  backgroundColor: colors.sky500,
+                  borderWidth: 1.5,
+                  borderColor: colors.sky700,
+                  opacity: genBusy || !genPrompt.trim() ? 0.55 : pressed ? 0.85 : 1,
+                  borderCurve: 'continuous',
+                })}>
+                {genBusy ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
+                <Text style={{ color: '#FFFFFF', fontFamily: wingmanFonts.text, fontSize: 13, fontWeight: '800' }}>
+                  {genBusy ? 'Building…' : 'Generate'}
+                </Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
