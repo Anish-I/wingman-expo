@@ -30,7 +30,9 @@ const env = z.object({
   DEFAULT_LLM_PROVIDER: z.string().default('demo'),
   LLM_PROVIDER: z.string().optional(),
   LLM_MODEL: z.string().optional(),
+  LLM_BASE_URL: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  DEEPSEEK_API_KEY: z.string().optional(),
   COMPOSIO_API_KEY: z.string().optional(),
   COMPOSIO_AUTH_CONFIGS: z.string().optional(),
   SUPABASE_URL: z.string().optional(),
@@ -50,7 +52,9 @@ const store = await PgStore.open(env.DATABASE_URL, { seedDemoAccount: !supabaseA
 const llmProvider = pickProvider({
   LLM_PROVIDER: env.LLM_PROVIDER,
   LLM_MODEL: env.LLM_MODEL,
+  LLM_BASE_URL: env.LLM_BASE_URL,
   OPENAI_API_KEY: env.OPENAI_API_KEY,
+  DEEPSEEK_API_KEY: env.DEEPSEEK_API_KEY,
 });
 const supabaseAuth = createSupabaseAuth({
   SUPABASE_URL: env.SUPABASE_URL,

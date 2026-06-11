@@ -23,10 +23,11 @@ function toOpenAIMessages(messages: ChatMessage[]) {
   });
 }
 
-export function createOpenAIProvider(params: { apiKey: string; model: string; baseURL?: string }): LLMProvider {
+// Works for any OpenAI-compatible Chat Completions endpoint (OpenAI, DeepSeek, …).
+export function createOpenAIProvider(params: { apiKey: string; model: string; baseURL?: string; id?: string }): LLMProvider {
   const client = new OpenAI({ apiKey: params.apiKey, baseURL: params.baseURL });
   return {
-    id: 'openai',
+    id: params.id ?? 'openai',
     async *stream(req: LLMRequest): AsyncIterable<LLMStreamChunk> {
       const tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined = req.tools?.map((t) => ({
         type: 'function' as const,
