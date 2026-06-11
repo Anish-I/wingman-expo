@@ -56,7 +56,7 @@ export async function runDueFlows(
     try {
       const registry = await buildRegistry({ ctx, composio });
       const result = await runFlowDefinition(def, registry, ctx);
-      await store.recordFlowRun(flow.id, now.toISOString());
+      await store.recordFlowRun(flow.id, flow.userId, now.toISOString());
       ran += 1;
 
       if (result.ok) {

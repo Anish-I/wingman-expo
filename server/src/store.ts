@@ -372,9 +372,10 @@ export class PgStore {
     }));
   }
 
-  /** Record a successful run: bump the counter and stamp last_run_at. */
-  async recordFlowRun(flowId: string, at: string): Promise<void> {
-    await this.pool.query('UPDATE flows SET runs = runs + 1, last_run_at = $2 WHERE id = $1', [flowId, at]);
+  /** Record a successful run: bump the counter and stamp last_run_at. Scoped to
+   *  the owner so a run can never touch another user's flow row. */
+  async recordFlowRun(flowId: string, userId: string, at: string): Promise<void> {
+    await this.pool.query('UPDATE flows SET runs = runs + 1, last_run_at = $3 WHERE id = $1 AND user_id = $2', [flowId, userId, at]);
   }
 
   /** One flow (with its executable definition), scoped to its owner. */

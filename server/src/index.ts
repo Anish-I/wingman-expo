@@ -543,7 +543,7 @@ app.post('/flows/:id/run', async (request, reply) => {
   const ctx = { userId: user.id, store };
   const registry = await buildRegistry({ ctx, composio: composioRuntime });
   const result = await runFlowDefinition(flow.definition, registry, ctx);
-  await store.recordFlowRun(flow.id, new Date().toISOString());
+  await store.recordFlowRun(flow.id, user.id, new Date().toISOString());
   await store.addActivity(user.id, {
     title: result.ok ? 'Flow ran' : 'Flow failed',
     subtitle: result.ok ? flow.title : `${flow.title}: ${result.error ?? 'unknown error'}`,
