@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS connect_tokens (
   app_slug   TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+-- Where to send the browser back after OAuth completes. Per-client (web origin
+-- vs. native wingman:// deep link), so it cannot be a single server env var.
+ALTER TABLE connect_tokens ADD COLUMN IF NOT EXISTS return_url TEXT;
 
 CREATE TABLE IF NOT EXISTS app_connections (
   user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

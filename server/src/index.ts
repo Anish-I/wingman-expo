@@ -419,16 +419,39 @@ app.get('/apps/status', async (request, reply) => {
   return reply.send({ connected, missing });
 });
 
+// Only let clients hand us return targets we're willing to redirect to, so a
+// connect token can't be turned into an open redirect. Allowed: the native app
+// scheme (wingman://…), or a web URL whose origin matches our configured
+// FRONTEND_URL. Everything else falls back to FRONTEND_URL.
+function safeReturnUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw);
+    if (u.protocol === 'wingman:') return raw;
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      if (u.origin === new URL(env.FRONTEND_URL).origin) return raw;
+    }
+  } catch {
+    // not a parseable URL — ignore and fall back to FRONTEND_URL
+  }
+  return undefined;
+}
+
 app.post('/connect/create-connect-token', async (request, reply) => {
   const user = await getAuthedUser(request);
   if (!user) {
     return reply.status(401).send({ error: 'Unauthorized' });
   }
-  const payload = z.object({ app: appSlugSchema }).parse(request.body);
+  const payload = z
+    .object({ app: appSlugSchema, returnUrl: z.string().optional() })
+    .parse(request.body);
   // Our connect token round-trips the (userId, appSlug) through the OAuth dance:
   // we hand it to Composio as the callback URL, and consume it when the user
-  // returns to mark the app connected.
-  const connectToken = await store.createConnectToken(user.id, payload.app);
+  // returns to mark the app connected. The client also tells us where to send
+  // the browser back to afterwards (web origin or native `wingman://` link), so
+  // one server works for web, iOS and Android at once.
+  const returnUrl = safeReturnUrl(payload.returnUrl);
+  const connectToken = await store.createConnectToken(user.id, payload.app, returnUrl);
   const callbackUrl = `${apiBaseUrl}/connect/callback?connectToken=${encodeURIComponent(connectToken)}`;
 
   // Real OAuth via Composio when a managed auth config exists for this toolkit.
@@ -461,7 +484,11 @@ app.get('/connect/callback', async (request, reply) => {
     return reply.status(400).send({ error: 'Invalid connect token.' });
   }
   await store.connectApp(record.userId, record.appSlug);
-  return reply.redirect(`${env.FRONTEND_URL}/apps?connected=${encodeURIComponent(record.appSlug)}`);
+  // Return the browser to wherever the client asked (web origin or native deep
+  // link); fall back to the configured web URL if none was supplied.
+  const base = record.returnUrl || `${env.FRONTEND_URL}/apps`;
+  const sep = base.includes('?') ? '&' : '?';
+  return reply.redirect(`${base}${sep}connected=${encodeURIComponent(record.appSlug)}`);
 });
 
 app.delete('/connect/:app', async (request, reply) => {

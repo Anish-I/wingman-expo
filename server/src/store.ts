@@ -394,21 +394,26 @@ export class PgStore {
     }));
   }
 
-  async createConnectToken(userId: string, appSlug: string) {
+  async createConnectToken(userId: string, appSlug: string, returnUrl?: string) {
     const token = randomId('connect');
     await this.pool.query(
-      'INSERT INTO connect_tokens (token, user_id, app_slug, created_at) VALUES ($1,$2,$3,$4)',
-      [token, userId, appSlug, nowIso()],
+      'INSERT INTO connect_tokens (token, user_id, app_slug, created_at, return_url) VALUES ($1,$2,$3,$4,$5)',
+      [token, userId, appSlug, nowIso(), returnUrl ?? null],
     );
     return token;
   }
 
   async consumeConnectToken(token: string) {
-    const res = await this.pool.query('SELECT token, user_id, app_slug FROM connect_tokens WHERE token = $1', [token]);
-    const row = res.rows[0] as { token: string; user_id: string; app_slug: string } | undefined;
+    const res = await this.pool.query(
+      'SELECT token, user_id, app_slug, return_url FROM connect_tokens WHERE token = $1',
+      [token],
+    );
+    const row = res.rows[0] as
+      | { token: string; user_id: string; app_slug: string; return_url: string | null }
+      | undefined;
     if (!row) return null;
     await this.pool.query('DELETE FROM connect_tokens WHERE token = $1', [token]);
-    return { token: row.token, userId: row.user_id, appSlug: row.app_slug };
+    return { token: row.token, userId: row.user_id, appSlug: row.app_slug, returnUrl: row.return_url };
   }
 
   async disconnectApp(userId: string, appSlug: string) {

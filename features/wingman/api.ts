@@ -146,23 +146,28 @@ export async function fetchApps(token: string) {
 }
 
 export async function beginAppConnection(token: string, app: string) {
+  // Where the server should send the browser back to once OAuth completes.
+  // expo-linking resolves this per platform: the web origin (e.g.
+  // http://host/apps) on web, and the `wingman://apps` deep link on native — so
+  // the same backend works for web, iOS and Android without changing env vars.
+  const returnUrl = Linking.createURL('/apps');
   const { initiateUrl } = await requestJson<{ connectToken: string; initiateUrl: string }>('/connect/create-connect-token', {
     method: 'POST',
     token,
-    body: { app },
+    body: { app, returnUrl },
   });
 
   // On web we can navigate the current tab to the OAuth page. On native there's
   // no `window.location` (RN defines a stub `window`, so a `typeof window` check
-  // is not enough — calling location.assign throws), so open the system browser
-  // and fall back to a raw deep link if that's unavailable.
+  // is not enough — calling location.assign throws), so open an auth session
+  // that watches for the `wingman://` return and auto-closes the browser.
   if (Platform.OS === 'web') {
     window.location.assign(initiateUrl);
     return;
   }
 
   try {
-    await WebBrowser.openBrowserAsync(initiateUrl);
+    await WebBrowser.openAuthSessionAsync(initiateUrl, returnUrl);
   } catch {
     await Linking.openURL(initiateUrl);
   }
