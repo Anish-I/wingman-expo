@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 
 import type {
@@ -151,12 +152,20 @@ export async function beginAppConnection(token: string, app: string) {
     body: { app },
   });
 
-  if (typeof window !== 'undefined') {
+  // On web we can navigate the current tab to the OAuth page. On native there's
+  // no `window.location` (RN defines a stub `window`, so a `typeof window` check
+  // is not enough — calling location.assign throws), so open the system browser
+  // and fall back to a raw deep link if that's unavailable.
+  if (Platform.OS === 'web') {
     window.location.assign(initiateUrl);
     return;
   }
 
-  await Linking.openURL(initiateUrl);
+  try {
+    await WebBrowser.openBrowserAsync(initiateUrl);
+  } catch {
+    await Linking.openURL(initiateUrl);
+  }
 }
 
 export async function fetchBriefing(token: string) {
