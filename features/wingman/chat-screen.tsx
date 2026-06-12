@@ -286,7 +286,10 @@ export function ChatScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: colors.bgAlt }}
-      behavior={process.env.EXPO_OS === 'ios' ? 'padding' : undefined}>
+      // `padding` on both platforms: with edge-to-edge the Android window no
+      // longer resizes for the keyboard, so an undefined behavior left the
+      // composer hidden underneath it.
+      behavior="padding">
       <View
         ref={rootRef}
         onLayout={remeasureAnchors}
@@ -595,6 +598,13 @@ export function ChatScreen() {
           />
           <Pressable
             onPress={() => {
+              // While recording, the button is a Stop control — even if speech
+              // has already filled the draft. Stopping first, then a second tap
+              // sends.
+              if (voice.listening) {
+                voice.stop();
+                return;
+              }
               if (draft) {
                 void sendMessage();
                 return;
@@ -609,7 +619,7 @@ export function ChatScreen() {
               );
             }}
             accessibilityLabel={
-              draft ? 'Send message' : voice.listening ? 'Stop dictation' : 'Dictate message'
+              voice.listening ? 'Stop dictation' : draft ? 'Send message' : 'Dictate message'
             }
             style={{
               width: 40,
@@ -617,15 +627,15 @@ export function ChatScreen() {
               borderRadius: 20,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: draft
-                ? reaction.color
-                : voice.listening
+              backgroundColor: voice.listening
                 ? colors.error
+                : draft
+                ? reaction.color
                 : colors.section,
             }}>
             <IconGlyph
-              name={draft ? 'arrow-up' : voice.listening ? 'stop' : 'mic'}
-              color={draft || voice.listening ? '#FFFFFF' : colors.fgSecondary}
+              name={voice.listening ? 'stop' : draft ? 'arrow-up' : 'mic'}
+              color={voice.listening || draft ? '#FFFFFF' : colors.fgSecondary}
               size={18}
             />
           </Pressable>

@@ -65,6 +65,10 @@ export function useVoiceDictation(
   // Snapshot of the draft when dictation started, so speech appends instead of
   // wiping what the user already typed.
   const baseTextRef = React.useRef('');
+  // Accumulated finalized speech segments. In continuous mode the recognizer
+  // emits a sequence of finals (one per utterance/pause), so we keep the earlier
+  // ones instead of letting a new segment overwrite them.
+  const finalizedRef = React.useRef('');
   const onTextRef = React.useRef(onText);
   const getBaseTextRef = React.useRef(getBaseText);
   onTextRef.current = onText;
@@ -77,9 +81,20 @@ export function useVoiceDictation(
   useSpeechRecognitionEvent('start', () => setListening(true));
 
   useSpeechRecognitionEvent('result', (event: AnyEvent) => {
-    const transcript = event.results?.[0]?.transcript ?? '';
+    const transcript = (event.results?.[0]?.transcript ?? '').trim();
     const base = baseTextRef.current;
-    const merged = base ? `${base} ${transcript.trim()}` : transcript.trimStart();
+    const finalized = finalizedRef.current;
+    // On a final result, fold this utterance into the accumulator. Interim
+    // results are shown live on top of whatever's already been finalized.
+    if (event.isFinal) {
+      finalizedRef.current = finalized ? `${finalized} ${transcript}` : transcript;
+    }
+    const spoken = event.isFinal
+      ? finalizedRef.current
+      : finalized
+      ? `${finalized} ${transcript}`
+      : transcript;
+    const merged = (base ? `${base} ${spoken}` : spoken).trim();
     onTextRef.current(merged);
   });
 
@@ -102,6 +117,7 @@ export function useVoiceDictation(
   const start = React.useCallback(async () => {
     setError(null);
     baseTextRef.current = getBaseTextRef.current().trim();
+    finalizedRef.current = '';
 
     try {
       // Web prompts for mic access on start(); native needs an explicit request.
@@ -115,7 +131,10 @@ export function useVoiceDictation(
       ExpoSpeechRecognitionModule.start({
         lang: detectLang(),
         interimResults: true,
-        continuous: false,
+        // Keep listening through natural pauses; the user stops it explicitly
+        // with the ■ button (otherwise Android ends the session after ~1s of
+        // silence and the composer flips to "send").
+        continuous: true,
         maxAlternatives: 1,
       });
       // 'start' event will flip `listening`, but set it eagerly so the UI reacts
