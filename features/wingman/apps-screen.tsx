@@ -179,10 +179,14 @@ export function AppsScreen() {
     }
     try {
       await beginConnection(appId);
+      // Reconcile once the auth session returns (covers the case where the
+      // OAuth redirect opened in an external browser, so the `?connected=`
+      // deep-link effect above never fired, and the already-connected case).
+      await refreshData();
     } catch (error) {
       setConnectError(error instanceof Error ? error.message : 'Could not start the connection.');
     }
-  }, [beginConnection]);
+  }, [beginConnection, refreshData]);
 
   return (
     <ScrollView

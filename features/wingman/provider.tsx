@@ -104,7 +104,7 @@ type WingmanContextValue = {
   signInWithPassword: (email: string, password: string) => Promise<AuthResult>;
   createAccount: (account: { name: string; email: string; password: string }) => Promise<AuthResult>;
   signOut: () => void;
-  beginConnection: (appId: string) => Promise<void>;
+  beginConnection: (appId: string) => Promise<{ alreadyConnected: boolean }>;
   refreshData: () => Promise<void>;
   setThemeMode: (mode: ThemeMode) => void;
   createFlow: () => Promise<FlowItem | null>;
@@ -379,7 +379,7 @@ export function WingmanProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Sign in before connecting apps.');
     }
     try {
-      await beginAppConnection(session.token, appId);
+      return await beginAppConnection(session.token, appId);
     } catch (error) {
       if (error instanceof Error && error.message === 'Unauthorized') {
         clearSession();

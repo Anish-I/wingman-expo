@@ -460,7 +460,16 @@ app.post('/connect/create-connect-token', async (request, reply) => {
     if (url) {
       return reply.send({ connectToken, initiateUrl: url });
     }
-    // Composio is on but this toolkit has no auth config yet.
+    // No OAuth URL came back. Composio returns none when the account is already
+    // connected — reconcile our store and tell the client instead of erroring
+    // (this is what happens when a first OAuth succeeded but the redirect back
+    // into the app didn't land). Otherwise the toolkit genuinely has no auth
+    // config yet.
+    const live = await composioRuntime.connectedToolkits(user.id);
+    if (live.has(payload.app.toLowerCase())) {
+      await store.connectApp(user.id, payload.app);
+      return reply.send({ alreadyConnected: true });
+    }
     return reply.status(400).send({ error: `${payload.app} isn't available to connect yet.` });
   }
 

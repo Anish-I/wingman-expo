@@ -145,32 +145,49 @@ export async function fetchApps(token: string) {
   return requestJson<{ totalAvailable: number; items: AppIntegration[] }>('/apps', { token });
 }
 
-export async function beginAppConnection(token: string, app: string) {
-  // Where the server should send the browser back to once OAuth completes.
-  // expo-linking resolves this per platform: the web origin (e.g.
-  // http://host/apps) on web, and the `wingman://apps` deep link on native — so
+export async function beginAppConnection(
+  token: string,
+  app: string,
+): Promise<{ alreadyConnected: boolean }> {
+  // Where the server should send the browser back to once OAuth completes, so
   // the same backend works for web, iOS and Android without changing env vars.
-  const returnUrl = Linking.createURL('/apps');
-  const { initiateUrl } = await requestJson<{ connectToken: string; initiateUrl: string }>('/connect/create-connect-token', {
-    method: 'POST',
-    token,
-    body: { app, returnUrl },
-  });
+  // Web: the current origin (e.g. http://host/apps). Native: the fixed app
+  // scheme `wingman://apps` (matches app.json `scheme`). We pin the native value
+  // instead of using Linking.createURL because in dev builds that can resolve to
+  // a launcher scheme like `exp+wingman://`, which the server rejects — sending
+  // the user back to the web FRONTEND_URL instead of into the app.
+  const returnUrl = Platform.OS === 'web' ? Linking.createURL('/apps') : 'wingman://apps';
+  const res = await requestJson<{ connectToken?: string; initiateUrl?: string; alreadyConnected?: boolean }>(
+    '/connect/create-connect-token',
+    {
+      method: 'POST',
+      token,
+      body: { app, returnUrl },
+    },
+  );
+
+  // Server already has an active connection (e.g. an earlier OAuth completed but
+  // the redirect back into the app didn't land) — nothing to open, just let the
+  // caller refresh.
+  if (res.alreadyConnected || !res.initiateUrl) {
+    return { alreadyConnected: true };
+  }
 
   // On web we can navigate the current tab to the OAuth page. On native there's
   // no `window.location` (RN defines a stub `window`, so a `typeof window` check
   // is not enough — calling location.assign throws), so open an auth session
   // that watches for the `wingman://` return and auto-closes the browser.
   if (Platform.OS === 'web') {
-    window.location.assign(initiateUrl);
-    return;
+    window.location.assign(res.initiateUrl);
+    return { alreadyConnected: false };
   }
 
   try {
-    await WebBrowser.openAuthSessionAsync(initiateUrl, returnUrl);
+    await WebBrowser.openAuthSessionAsync(res.initiateUrl, returnUrl);
   } catch {
-    await Linking.openURL(initiateUrl);
+    await Linking.openURL(res.initiateUrl);
   }
+  return { alreadyConnected: false };
 }
 
 export async function fetchBriefing(token: string) {
