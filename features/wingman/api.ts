@@ -274,6 +274,12 @@ export async function sendChat(token: string, message: string) {
     method: 'POST',
     token,
     body: { message },
+    // A chat turn runs a live LLM call plus any tool round-trips (e.g. scheduling
+    // a reminder), which routinely takes longer than the 4.5s default. Without a
+    // generous timeout the client aborts and shows "Request timed out" even though
+    // the server finishes and persists Pip's reply — the user then sees it only
+    // after reopening the app. This is the buffered path used on iOS/Android.
+    timeoutMs: 60000,
   });
 }
 
